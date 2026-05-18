@@ -16,6 +16,7 @@
             {{ t('authPage.login') }}
           </h2>
           <button
+            v-if="allowRegister"
             @click="AuthMode = 'register'"
             class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition duration-200 whitespace-nowrap flex-shrink-0"
           >
@@ -80,7 +81,7 @@
         </div>
       </div>
       <!-- 注册 -->
-      <div v-else-if="AuthMode === 'register'">
+      <div v-else-if="AuthMode === 'register' && allowRegister">
         <div class="flex items-center justify-between gap-3 mb-3">
           <h2 class="text-lg font-bold text-[var(--color-text-muted)] leading-tight">
             {{ t('authPage.register') }}
@@ -124,11 +125,12 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import BaseInput from '@/components/common/BaseInput.vue'
 import BaseButton from '@/components/common/BaseButton.vue'
-import { useUserStore } from '@/stores'
+import { useUserStore, useSettingStore } from '@/stores'
 import Arrow from '@/components/icons/arrow.vue'
 import Passkey from '@/components/icons/passkey.vue'
 import Home from '@/components/icons/home.vue'
@@ -147,8 +149,17 @@ const AuthMode = ref<'login' | 'register'>('login') // login / register
 const username = ref<string>('')
 const password = ref<string>('')
 const userStore = useUserStore()
+const settingStore = useSettingStore()
+const { SystemSetting } = storeToRefs(settingStore)
+const allowRegister = computed(() => SystemSetting.value.allow_register !== false)
 const { t } = useI18n()
 const passkeySupported = !!(window.PublicKeyCredential && navigator.credentials)
+
+watch(allowRegister, (enabled) => {
+  if (!enabled && AuthMode.value === 'register') {
+    AuthMode.value = 'login'
+  }
+})
 
 const oauth2Status = ref<App.Api.Setting.OAuth2Status | null>(null)
 const passkeyStatus = ref<App.Api.Setting.PasskeyStatus | null>(null)
