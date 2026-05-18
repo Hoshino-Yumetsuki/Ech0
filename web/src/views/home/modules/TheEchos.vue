@@ -1,16 +1,13 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <!-- Copyright (C) 2025-2026 lin-snow -->
 <template>
-  <div
-    class="mx-auto mt-1 sm:mt-0 mb-4 sm:mb-5 md:mb-6"
-    :class="compact ? 'pl-1 pr-0 max-w-full' : 'px-2 sm:px-4 md:px-6 max-w-full'"
-  >
+  <div class="echos-list mx-auto mt-1 sm:mt-0 mb-4 sm:mb-5 md:mb-6">
     <!-- Echos - 使用 TransitionGroup 实现入场动画 -->
     <TransitionGroup
       v-if="echoStore.echoList"
       name="list"
       tag="div"
-      class="relative"
+      class="echos-list__stack"
       @before-enter="onBeforeEnter"
       @enter="onEnter"
       @before-leave="onBeforeLeave"
@@ -91,7 +88,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 const props = defineProps<{
   scrollTarget?: HTMLElement | null
-  /** 首页窄栏：减少左右留白以贴合参考图时间线宽度 */
+  /** @deprecated 三栏布局中 main 列已限定宽度，无需此 flag；保留是为了向后兼容 */
   compact?: boolean
 }>()
 
@@ -242,6 +239,17 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.echos-list {
+  width: 100%;
+}
+
+.echos-list__stack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
 .echos-toolbar {
   font-family: var(--font-family-display);
 }

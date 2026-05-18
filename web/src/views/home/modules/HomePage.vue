@@ -3,62 +3,64 @@
 <template>
   <div class="home-page">
     <div class="home-shell">
-      <div class="home-layout">
-        <div
-          ref="mainColumn"
-          class="home-main"
-          :class="{ 'home-main--unclipped': activeTab === 'tags' }"
-        >
-          <div class="home-main-track">
-            <HomeHeader class="mb-3 mx-1" />
-            <aside class="home-aside home-aside--mobile">
-              <HomeSidebarNav
-                v-model:mobile-search-open="mobileSearchOpen"
-                class="mx-1"
-                @open-palette="paletteOpen = true"
-              />
-            </aside>
-            <div
-              v-if="activeTab === 'publish'"
-              class="home-content-block home-content-block--publish"
-            >
-              <TheEditor />
-            </div>
-            <div v-else-if="activeTab === 'tags'" class="home-content-block">
-              <TheTagsManager />
-            </div>
+      <!-- 左栏：品牌 + 主导航 + 快捷操作（≥820px 显示） -->
+      <HomeLeftRail class="home-shell__left" />
 
-            <template v-else-if="activeTab === 'home'">
-              <HomeBanner :class="{ 'home-banner--mobile-hidden': shouldHideBannerOnMobile }" />
-
-              <TheEchos compact :scroll-target="mainColumn" />
-            </template>
-
-            <div v-else-if="activeTab === 'status'" class="home-content-block home-status-widgets">
-              <TheHeatMap />
-              <TheRecentCard v-if="AgentSetting.enable" />
-              <TheConnectWidget />
-              <TheCommentWidget />
-            </div>
-            <HubPage v-else embedded :scroll-target="mainColumn" />
-          </div>
+      <!-- 中栏：主信息流 / 编辑器 / 标签 / 广场 / 状态 -->
+      <main
+        ref="mainColumn"
+        class="home-shell__main"
+        :class="{ 'home-shell__main--unclipped': activeTab === 'tags' }"
+      >
+        <!-- 移动端品牌 + 导航：仅 <820px 显示 -->
+        <div class="home-shell__mobile-top">
+          <HomeHeader class="home-shell__mobile-header" />
+          <HomeSidebarNav
+            v-model:mobile-search-open="mobileSearchOpen"
+            class="home-shell__mobile-nav"
+            @open-palette="paletteOpen = true"
+          />
         </div>
 
-        <aside class="home-aside home-aside--rail">
-          <HomeSidebarNav />
-          <div class="home-aside__filter-block">
-            <TheFilter @open-palette="paletteOpen = true" />
-            <a
-              href="https://github.com/lin-snow/Ech0"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="home-aside__version"
-            >
-              version: {{ settingStore.hello?.version || '--' }}
-            </a>
-          </div>
-        </aside>
-      </div>
+        <div
+          v-if="activeTab === 'publish'"
+          class="home-content-block home-content-block--publish"
+        >
+          <TheEditor />
+        </div>
+        <div v-else-if="activeTab === 'tags'" class="home-content-block">
+          <TheTagsManager />
+        </div>
+
+        <template v-else-if="activeTab === 'home'">
+          <HomeBanner :class="{ 'home-banner--mobile-hidden': shouldHideBannerOnMobile }" />
+          <TheEchos :scroll-target="mainColumn" />
+        </template>
+
+        <div v-else-if="activeTab === 'status'" class="home-content-block home-status-widgets">
+          <PanelCard border-style="solid" class="home-status-widgets__card">
+            <TheHeatMap />
+          </PanelCard>
+          <PanelCard
+            v-if="AgentSetting.enable"
+            border-style="solid"
+            class="home-status-widgets__card"
+          >
+            <TheRecentCard />
+          </PanelCard>
+          <PanelCard border-style="solid" class="home-status-widgets__card">
+            <TheConnectWidget />
+          </PanelCard>
+          <PanelCard border-style="solid" class="home-status-widgets__card">
+            <TheCommentWidget />
+          </PanelCard>
+        </div>
+
+        <HubPage v-else embedded :scroll-target="mainColumn" />
+      </main>
+
+      <!-- 右栏：搜索 + 常驻 widgets + version（≥1100px 显示） -->
+      <HomeRightRail class="home-shell__right" @open-palette="paletteOpen = true" />
     </div>
     <TheCommandPalette v-model="paletteOpen" />
   </div>
@@ -68,9 +70,11 @@
 import HomeHeader from './HomeHeader.vue'
 import HomeBanner from './HomeBanner.vue'
 import HomeSidebarNav from './HomeSidebarNav.vue'
-import TheFilter from './TheFilter.vue'
+import HomeLeftRail from './HomeLeftRail.vue'
+import HomeRightRail from './HomeRightRail.vue'
 import TheEchos from './TheEchos.vue'
 import TheCommandPalette from './TheCommandPalette.vue'
+import PanelCard from '@/layout/PanelCard.vue'
 import { defineAsyncComponent, onMounted, ref, onBeforeUnmount, computed, watch } from 'vue'
 import { useEchoStore, useUserStore, useSettingStore } from '@/stores'
 import { useRoute } from 'vue-router'
@@ -128,7 +132,6 @@ const handleGlobalKeydown = (event: KeyboardEvent) => {
 
 const saveTimelineScrollPosition = () => {
   if (!mainColumn.value || timelineScrollRaf !== null) return
-
   timelineScrollRaf = window.requestAnimationFrame(() => {
     timelineScrollRaf = null
     if (!mainColumn.value) return
@@ -136,7 +139,6 @@ const saveTimelineScrollPosition = () => {
   })
 }
 
-// 手机布局下滚动发生在 window 上，单独持久化以便恢复。
 const saveWindowScrollPosition = () => {
   if (windowScrollRaf !== null) return
   windowScrollRaf = window.requestAnimationFrame(() => {
@@ -160,9 +162,6 @@ const restoreTimelineScrollPosition = () => {
   }
 }
 
-// 空闲时预热下游 chunk：
-//   - EchoView：点击日期跳详情前提前下好
-//   - markdown core：避免慢网下首屏 echo 卡片显示原文 fallback 的过渡时长
 const prefetchHeavyChunks = () => {
   const trigger = () => {
     import('@/views/echo/EchoView.vue').catch(() => {})
@@ -183,7 +182,6 @@ onMounted(async () => {
     mainColumn.value.addEventListener('scroll', saveTimelineScrollPosition, { passive: true })
   }
   window.addEventListener('scroll', saveWindowScrollPosition, { passive: true })
-  // 等首批 echo 渲染后再恢复滚动位置，否则容器高度还没撑开，scrollTop 会被夹到 0。
   const stopScrollRestoreWatch = watch(
     () => echoStore.echoList.length > 0 && !echoStore.isLoading,
     (ready) => {
@@ -218,15 +216,17 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .home-page {
-  --home-canvas: var(--color-bg-canvas, #f5f3ef);
-  --home-accent: #e07020;
-  --home-main-max: 28rem;
+  --home-canvas: var(--color-bg-canvas, #ebe6df);
+  --home-rail-left: 15rem;
+  --home-rail-right: 19rem;
+  --home-main-max: 36rem;
 
   min-height: 100dvh;
   background: var(--home-canvas);
   color: var(--color-text-primary);
 }
 
+/* 桌面端：整个 home-page 视口高度，左右栏 sticky，中栏自滚 */
 @media (width >= 820px) {
   .home-page {
     height: 100dvh;
@@ -234,115 +234,94 @@ onBeforeUnmount(() => {
   }
 }
 
+/* === 移动端 (<820px)：单栏 === */
 .home-shell {
-  max-width: 50rem;
-  margin: 1rem auto 2.5rem;
+  margin: 0 auto;
   padding: 0 0.75rem;
+  max-width: 36rem;
 }
 
 @media (width >= 640px) {
   .home-shell {
-    margin-top: 1.25rem;
-    margin-bottom: 2rem;
     padding: 0 1rem;
   }
 }
 
-@media (width >= 820px) {
-  .home-shell {
-    margin: 0 auto;
-    padding: 0 1rem;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-  }
+.home-shell__left,
+.home-shell__right {
+  display: none;
 }
 
-.home-layout {
+.home-shell__mobile-top {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
-  align-items: stretch;
-  background: transparent;
+  gap: 0.5rem;
+  padding-top: 1rem;
+  padding-bottom: 0.5rem;
 }
 
-@media (width >= 820px) {
-  .home-layout {
-    flex: 1;
-    min-height: 0;
-    flex-direction: row;
-    align-items: flex-start;
-    justify-content: center;
-    gap: clamp(1.25rem, 4vw, 2rem);
-    padding: 0;
-  }
-}
-
-.home-main-track {
-  width: 100%;
-  max-width: var(--home-main-max);
-  margin-left: auto;
-  margin-right: auto;
-}
-
-.home-main {
+.home-shell__main {
   width: 100%;
   min-width: 0;
-  flex: 1 1 auto;
-  overflow-x: visible;
+  padding-bottom: 2rem;
 }
 
+/* === 平板 (820-1099px)：左栏 + 中栏 === */
 @media (width >= 820px) {
-  .home-main {
-    min-height: 0;
-    align-self: stretch;
-    overflow-y: auto;
-    scrollbar-gutter: stable;
-    overscroll-behavior: contain;
-    flex: 0 1 var(--home-main-max);
-    max-width: var(--home-main-max);
-    padding: 1.5rem 0 2rem;
+  .home-shell {
+    display: grid;
+    grid-template-columns: var(--home-rail-left) minmax(0, 1fr);
+    gap: 0;
+    max-width: calc(var(--home-rail-left) + var(--home-main-max));
+    padding: 0;
+    height: 100%;
   }
 
-  .home-main--unclipped {
+  .home-shell__left {
+    display: flex;
+    height: 100%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    border-right: 1px solid var(--color-border-subtle);
+  }
+
+  .home-shell__main {
+    height: 100%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    padding: 1.25rem 1.5rem 2rem;
+  }
+
+  .home-shell__main--unclipped {
     overflow: visible auto;
   }
+
+  /* 桌面布局下隐藏中栏顶部移动端品牌 */
+  .home-shell__mobile-top {
+    display: none;
+  }
 }
 
-.home-aside {
-  display: flex;
-  flex-direction: column;
-  gap: 0.875rem;
-  width: 100%;
+/* === 桌面 (≥1100px)：完整三栏 === */
+@media (width >= 1100px) {
+  .home-shell {
+    grid-template-columns: var(--home-rail-left) minmax(0, 1fr) var(--home-rail-right);
+    max-width: calc(var(--home-rail-left) + var(--home-main-max) + var(--home-rail-right));
+  }
+
+  .home-shell__right {
+    display: flex;
+    height: 100%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    border-left: 1px solid var(--color-border-subtle);
+  }
 }
 
-.home-aside__filter-block {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.home-aside__version {
-  display: inline-block;
-  margin: 0;
-  margin-top: 0.5rem;
-  padding-inline: 0.5rem;
-  font-family: var(--font-family-display);
-  font-weight: 600;
-  font-size: 0.75rem;
-  line-height: 1.25;
-  letter-spacing: 0.02em;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-secondary);
-  text-decoration: none;
-  cursor: pointer;
-  transition: color 0.2s;
-}
-
-.home-aside__version:hover {
-  color: var(--color-text-primary);
-}
-
+/* === 主内容容器内边距：移动端紧凑 === */
 .home-content-block {
   width: 100%;
 }
@@ -357,45 +336,25 @@ onBeforeUnmount(() => {
   gap: 0.75rem;
 }
 
+.home-status-widgets__card {
+  padding: 0.5rem !important;
+}
+
 @media (width >= 768px) {
   .home-content-block--publish {
-    padding-inline: 1.75rem;
+    padding-inline: 1.25rem;
   }
 }
 
 @media (width >= 1024px) {
   .home-content-block--publish {
-    padding-inline: 2rem;
-  }
-}
-
-.home-aside--mobile {
-  display: flex;
-  margin-top: 0.5rem;
-  margin-bottom: 0.75rem;
-}
-
-@media (width >= 820px) {
-  .home-aside--mobile {
-    display: none !important;
-  }
-
-  .home-aside--rail {
-    display: flex;
-    width: 14rem;
-    flex-shrink: 0;
-    align-self: flex-start;
-    margin-top: 1.5rem;
+    padding-inline: 1.5rem;
   }
 }
 
 @media (width <= 819.98px) {
   .home-banner--mobile-hidden {
     display: none;
-  }
-
-  .home-aside--rail {
-    display: none !important;
   }
 }
 </style>

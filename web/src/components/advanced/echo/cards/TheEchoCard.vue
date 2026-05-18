@@ -1,35 +1,34 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <!-- Copyright (C) 2025-2026 lin-snow -->
 <template>
-  <div class="echo-timeline group w-full">
-    <div class="echo-header-sticky flex justify-between items-center">
-      <div class="flex justify-start items-center h-9">
-        <div class="flex items-center h-full pr-1">
-          <div class="timeline-marker" :class="{ 'is-first': props.index === 0 }">
-            <div class="w-2 h-2 rounded-full bg-[var(--color-accent)]"></div>
-          </div>
-          <div
-            @click="handleExpandEcho(echo.id)"
-            class="flex items-center h-full justify-start leading-none text-sm font-semibold text-nowrap text-[var(--color-accent)] cursor-pointer hover:underline hover:decoration-offset-3 hover:decoration-1 mr-1"
-          >
-            {{ formatDate(props.echo.created_at) }}
-          </div>
-          <button
-            type="button"
-            class="echo-open-btn flex items-center justify-center w-6 h-6 rounded-sm text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 transition-opacity duration-150 hover:text-[var(--color-text-primary)] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-border-subtle)]"
-            :aria-label="t('echoCard.openDetail')"
-            v-tooltip="t('echoCard.openDetail')"
-            @click="handleExpandEcho(echo.id)"
-          >
-            <Open class="w-3.5 h-3.5" />
-          </button>
-        </div>
+  <article class="echo-card group w-full">
+    <header class="echo-card__header flex justify-between items-center">
+      <div class="flex justify-start items-center h-9 gap-1.5">
+        <span class="echo-card__dot" aria-hidden="true">
+          <span class="w-2 h-2 rounded-full bg-[var(--color-accent)]"></span>
+        </span>
+        <button
+          type="button"
+          @click="handleExpandEcho(echo.id)"
+          class="flex items-center h-full justify-start leading-none text-sm font-semibold text-nowrap text-[var(--color-accent)] cursor-pointer hover:underline hover:decoration-offset-3 hover:decoration-1"
+        >
+          {{ formatDate(props.echo.created_at) }}
+        </button>
+        <button
+          type="button"
+          class="echo-open-btn flex items-center justify-center w-6 h-6 rounded-sm text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 transition-opacity duration-150 hover:text-[var(--color-text-primary)] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-border-subtle)]"
+          :aria-label="t('echoCard.openDetail')"
+          v-tooltip="t('echoCard.openDetail')"
+          @click="handleExpandEcho(echo.id)"
+        >
+          <Open class="w-3.5 h-3.5" />
+        </button>
       </div>
 
       <div
         v-if="!userStore.isLogin && props.echo.private"
         v-tooltip="t('echoCard.privateStatus')"
-        class="w-7 h-7 flex items-center justify-center bg-[var(--color-bg-surface)] ring-1 ring-[var(--color-border-subtle)] ring-inset rounded-full shadow-sm"
+        class="w-7 h-7 flex items-center justify-center bg-[var(--color-bg-muted)] ring-1 ring-[var(--color-border-subtle)] ring-inset rounded-full"
       >
         <Lock class="w-4 h-4" />
       </div>
@@ -41,7 +40,7 @@
           :aria-label="t('echoCard.moreActions')"
           :aria-expanded="isMenuOpen"
           aria-haspopup="menu"
-          class="w-7 h-7 flex items-center justify-center bg-[var(--color-bg-surface)] ring-1 ring-[var(--color-border-subtle)] ring-inset rounded-full shadow-sm transition-shadow duration-150 hover:shadow-md focus:outline-none"
+          class="w-7 h-7 flex items-center justify-center bg-[var(--color-bg-muted)] ring-1 ring-[var(--color-border-subtle)] ring-inset rounded-full transition-shadow duration-150 hover:shadow-sm focus:outline-none"
           @click.stop="toggleMenu"
         >
           <More class="w-5 h-5" />
@@ -60,7 +59,7 @@
               v-if="isMenuOpen"
               ref="menuPanelRef"
               :style="menuPanelStyle"
-              class="fixed z-5000 w-36 origin-top-right rounded-[var(--radius-md)] bg-[var(--color-bg-muted)] ring-1 ring-[var(--color-border-subtle)] shadow-[var(--shadow-md)] p-1"
+              class="fixed z-5000 w-36 origin-top-right rounded-[var(--radius-md)] bg-[var(--color-bg-surface)] ring-1 ring-[var(--color-border-subtle)] shadow-[var(--shadow-md)] p-1"
             >
               <div
                 v-if="props.echo.private"
@@ -102,46 +101,44 @@
           </transition>
         </Teleport>
       </div>
-    </div>
+    </header>
 
-    <div class="timeline-content">
-      <div class="px-4 py-3">
-        <template
-          v-if="
-            props.echo.layout === ImageLayout.GRID ||
-            props.echo.layout === ImageLayout.HORIZONTAL ||
-            props.echo.layout === ImageLayout.STACK
-          "
-        >
-          <div class="mx-auto w-11/12 pl-1 mb-3">
-            <TheMdPreview :content="props.echo.content" />
-          </div>
-
-          <TheImageGallery
-            :images="echoImageFiles"
-            :layout="props.echo.layout"
-            :priority="props.index === 0"
-          />
-        </template>
-
-        <template v-else>
-          <TheImageGallery
-            :images="echoImageFiles"
-            :layout="props.echo.layout"
-            :priority="props.index === 0"
-          />
-
-          <div class="mx-auto w-11/12 pl-1 mt-3">
-            <TheMdPreview :content="props.echo.content" />
-          </div>
-        </template>
-
-        <div v-if="props.echo.extension" class="my-2">
-          <TheExtensionRenderer :echo="props.echo" />
+    <div class="echo-card__body">
+      <template
+        v-if="
+          props.echo.layout === ImageLayout.GRID ||
+          props.echo.layout === ImageLayout.HORIZONTAL ||
+          props.echo.layout === ImageLayout.STACK
+        "
+      >
+        <div class="echo-card__content">
+          <TheMdPreview :content="props.echo.content" />
         </div>
+
+        <TheImageGallery
+          :images="echoImageFiles"
+          :layout="props.echo.layout"
+          :priority="props.index === 0"
+        />
+      </template>
+
+      <template v-else>
+        <TheImageGallery
+          :images="echoImageFiles"
+          :layout="props.echo.layout"
+          :priority="props.index === 0"
+        />
+
+        <div class="echo-card__content echo-card__content--after-gallery">
+          <TheMdPreview :content="props.echo.content" />
+        </div>
+      </template>
+
+      <div v-if="props.echo.extension" class="echo-card__extension">
+        <TheExtensionRenderer :echo="props.echo" />
       </div>
     </div>
-  </div>
+  </article>
 </template>
 
 <script lang="ts">
@@ -302,56 +299,59 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped lang="css">
-.echo-header-sticky {
+/* 离散卡片：bg-surface 在加深的 canvas 上明显"浮起"，
+   保留日期点 marker 作为内容平台的视觉锚点 */
+.echo-card {
+  position: relative;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 0.5rem 0.75rem 0.75rem;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.echo-card:hover {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-soft);
+}
+
+.echo-card__header {
   position: relative;
   z-index: 1;
-  background-color: var(--color-bg-canvas);
-  overflow: hidden;
 }
 
-.echo-timeline {
-  --axis-offset: calc(0.25rem + 1px);
-  --axis-line-width: 2px;
-  --axis-dot-size: 0.5rem;
-  --axis-dot-gap: 0.3rem;
-
-  max-width: 100%;
-  overflow: clip visible;
-
-  /* 纵向允许溢出绘制，避免时间线内图片（如照片流 hover 放大）被裁切 */
-}
-
-.timeline-marker {
-  position: relative;
-  width: var(--axis-dot-size);
-  height: 100%;
-  margin-right: 0.5rem;
-  margin-left: calc(var(--axis-offset) - (var(--axis-dot-size) / 2));
-  display: flex;
+.echo-card__dot {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 0.625rem;
+  height: 100%;
+  flex-shrink: 0;
 }
 
-.timeline-content {
-  position: relative;
-  margin-left: var(--axis-offset);
-  max-width: 100%;
-  min-width: 0;
-  overflow: clip visible;
+.echo-card__body {
+  margin-top: 0.25rem;
 }
 
-.timeline-content::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: var(--axis-line-width);
-  background-color: var(--color-border-subtle);
-  pointer-events: none;
+.echo-card__content {
+  padding: 0 0.25rem;
+  margin-bottom: 0.5rem;
 }
 
-.echo-timeline:hover .echo-open-btn {
+.echo-card__content--after-gallery {
+  margin-top: 0.75rem;
+  margin-bottom: 0;
+}
+
+.echo-card__extension {
+  margin-top: 0.5rem;
+}
+
+.echo-card:hover .echo-open-btn {
   animation: echo-open-nudge-left 1200ms ease-out both;
 }
 
@@ -412,12 +412,12 @@ onBeforeUnmount(() => {
 
 .menu-row:hover {
   color: var(--color-text-primary);
-  background: var(--color-bg-surface);
+  background: var(--color-bg-muted);
 }
 
 .menu-row:focus-visible {
   outline: none;
-  background: var(--color-bg-surface);
+  background: var(--color-bg-muted);
   box-shadow: inset 0 0 0 1.5px var(--color-border-strong);
 }
 

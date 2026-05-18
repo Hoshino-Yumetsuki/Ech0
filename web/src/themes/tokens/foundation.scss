@@ -17,18 +17,22 @@
   --radius-md: 0.625rem;
   --radius-lg: 0.875rem;
 
-  --shadow-sm: 0 1px 2px rgb(45 40 37 / 8%);
+  /* 阴影：在原低透明基础上叠加二级散射，使卡片在 canvas 上更明显地"浮起" */
+  --shadow-sm:
+    0 1px 2px rgb(45 40 37 / 10%), 0 2px 6px rgb(45 40 37 / 6%);
   --shadow-soft:
-    0 1px 2px rgb(45 40 37 / 3%), 0 2px 6px rgb(45 40 37 / 3%), 0 4px 12px rgb(45 40 37 / 2%);
-  --shadow-md: 0 8px 26px rgb(45 40 37 / 12%);
+    0 2px 4px rgb(45 40 37 / 8%), 0 4px 10px rgb(45 40 37 / 6%), 0 10px 20px rgb(45 40 37 / 5%);
+  --shadow-md: 0 4px 10px rgb(45 40 37 / 12%), 0 14px 30px rgb(45 40 37 / 16%);
 }
 
 @supports (color: oklch(0% 0 0)) {
   :root {
-    --shadow-sm: 0 1px 2px oklch(28.2% 0.01 53.8deg / 8%);
+    --shadow-sm:
+      0 1px 2px oklch(28.2% 0.01 53.8deg / 10%), 0 2px 6px oklch(28.2% 0.01 53.8deg / 6%);
     --shadow-soft:
-      0 1px 2px oklch(28.2% 0.01 53.8deg / 3%), 0 2px 6px oklch(28.2% 0.01 53.8deg / 3%),
-      0 4px 12px oklch(28.2% 0.01 53.8deg / 2%);
-    --shadow-md: 0 8px 26px oklch(28.2% 0.01 53.8deg / 12%);
+      0 2px 4px oklch(28.2% 0.01 53.8deg / 8%), 0 4px 10px oklch(28.2% 0.01 53.8deg / 6%),
+      0 10px 20px oklch(28.2% 0.01 53.8deg / 5%);
+    --shadow-md:
+      0 4px 10px oklch(28.2% 0.01 53.8deg / 12%), 0 14px 30px oklch(28.2% 0.01 53.8deg / 16%);
   }
 }
