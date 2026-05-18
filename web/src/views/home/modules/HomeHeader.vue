@@ -86,6 +86,7 @@
 import LightIcon from '@/components/icons/light.vue'
 import DarkIcon from '@/components/icons/dark.vue'
 import LeafIcon from '@/components/icons/leaf.vue'
+import SystemIcon from '@/components/icons/system.vue'
 import Rss from '@/components/icons/rss.vue'
 import Auth from '@/components/icons/auth.vue'
 import Signoff from '@/components/icons/signoff.vue'
@@ -163,18 +164,22 @@ const runTypingEffect = () => {
 }
 
 const nextThemeMode = computed(() => {
+  if (themeStore.mode === 'system') return 'light'
   if (themeStore.mode === 'light') return 'sunny'
   if (themeStore.mode === 'sunny') return 'dark'
-  return 'light'
+  return 'system'
 })
 
 const themeIcon = computed(() => {
-  if (nextThemeMode.value === 'light') return LightIcon
-  if (nextThemeMode.value === 'dark') return DarkIcon
+  // 按钮图标反映当前生效模式：跟随系统 -> 系统图标
+  if (themeStore.mode === 'system') return SystemIcon
+  if (themeStore.mode === 'light') return LightIcon
+  if (themeStore.mode === 'dark') return DarkIcon
   return LeafIcon
 })
 
 const nextThemeModeLabel = computed(() => {
+  if (nextThemeMode.value === 'system') return String(t('homeNav.themeSystem'))
   if (nextThemeMode.value === 'light') return String(t('homeNav.themeLight'))
   if (nextThemeMode.value === 'dark') return String(t('homeNav.themeDark'))
   return String(t('homeNav.themeSunny'))

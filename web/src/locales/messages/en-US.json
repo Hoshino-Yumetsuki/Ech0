@@ -357,6 +357,7 @@
     "themeLight": "Light",
     "themeDark": "Dark",
     "themeSunny": "Sunny",
+    "themeSystem": "Follow system",
     "githubAction": "GitHub"
   },
   "homeTop": {

@@ -37,7 +37,7 @@
         @click="handleThemeToggle"
       >
         <component :is="themeIcon" class="home-left-rail__action-icon" />
-        <span class="home-left-rail__action-label">{{ nextThemeModeLabel }}</span>
+        <span class="home-left-rail__action-label">{{ currentThemeModeLabel }}</span>
       </button>
       <a
         href="/rss"
@@ -103,6 +103,7 @@ import PanelIcon from '@/components/icons/panel.vue'
 import LightIcon from '@/components/icons/light.vue'
 import DarkIcon from '@/components/icons/dark.vue'
 import LeafIcon from '@/components/icons/leaf.vue'
+import SystemIcon from '@/components/icons/system.vue'
 import Rss from '@/components/icons/rss.vue'
 import Zen from '@/components/icons/zen.vue'
 import Auth from '@/components/icons/auth.vue'
@@ -195,16 +196,26 @@ const isItemActive = (item: (typeof items)[number]) => {
 }
 
 const nextThemeMode = computed(() => {
+  if (themeStore.mode === 'system') return 'light'
   if (themeStore.mode === 'light') return 'sunny'
   if (themeStore.mode === 'sunny') return 'dark'
-  return 'light'
+  return 'system'
 })
 const themeIcon = computed(() => {
-  if (nextThemeMode.value === 'light') return LightIcon
-  if (nextThemeMode.value === 'dark') return DarkIcon
+  // 按钮始终展示“当前模式”，跟随系统时显示系统图标
+  if (themeStore.mode === 'system') return SystemIcon
+  if (themeStore.mode === 'light') return LightIcon
+  if (themeStore.mode === 'dark') return DarkIcon
   return LeafIcon
 })
+const currentThemeModeLabel = computed(() => {
+  if (themeStore.mode === 'system') return String(t('homeNav.themeSystem'))
+  if (themeStore.mode === 'light') return String(t('homeNav.themeLight'))
+  if (themeStore.mode === 'dark') return String(t('homeNav.themeDark'))
+  return String(t('homeNav.themeSunny'))
+})
 const nextThemeModeLabel = computed(() => {
+  if (nextThemeMode.value === 'system') return String(t('homeNav.themeSystem'))
   if (nextThemeMode.value === 'light') return String(t('homeNav.themeLight'))
   if (nextThemeMode.value === 'dark') return String(t('homeNav.themeDark'))
   return String(t('homeNav.themeSunny'))

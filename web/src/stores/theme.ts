@@ -5,7 +5,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { localStg } from '@/utils/storage'
 
-export type ThemeMode = 'light' | 'dark' | 'sunny'
+export type ThemeMode = 'light' | 'dark' | 'sunny' | 'system'
 type ThemeType = 'light' | 'dark' | 'sunny'
 const THEME_COLOR_META_NAME = 'theme-color'
 const THEME_COLOR_FALLBACK: Record<ThemeType, string> = {
@@ -14,30 +14,41 @@ const THEME_COLOR_FALLBACK: Record<ThemeType, string> = {
   sunny: '#eeece6',
 }
 
+const SYSTEM_DARK_QUERY = '(prefers-color-scheme: dark)'
+
+const isThemeMode = (value: unknown): value is ThemeMode =>
+  value === 'light' || value === 'dark' || value === 'sunny' || value === 'system'
+
+const isThemeType = (value: unknown): value is ThemeType =>
+  value === 'light' || value === 'dark' || value === 'sunny'
+
+// 读取系统当前的颜色偏好；服务端或不支持 matchMedia 的环境下默认返回 'light'
+const getSystemTheme = (): ThemeType => {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return 'light'
+  }
+  return window.matchMedia(SYSTEM_DARK_QUERY).matches ? 'dark' : 'light'
+}
+
 export const useThemeStore = defineStore('themeStore', () => {
   const savedThemeMode = localStg.getItem('themeMode')
   const savedTheme = localStg.getItem('theme')
 
-  // 初始化 themeMode
-  const mode = ref<ThemeMode>(
-    savedThemeMode === 'light' || savedThemeMode === 'dark' || savedThemeMode === 'sunny'
-      ? savedThemeMode
-      : 'light',
-  )
-  const theme = ref<ThemeType>(
-    savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'sunny'
-      ? savedTheme
-      : 'light',
-  )
+  // 用户选择的主题模式：未存储或非法值时默认跟随系统
+  const mode = ref<ThemeMode>(isThemeMode(savedThemeMode) ? savedThemeMode : 'system')
+  // 实际生效的主题：只可能是 light / dark / sunny 三者之一
+  const theme = ref<ThemeType>(isThemeType(savedTheme) ? savedTheme : getSystemTheme())
 
-  // 内部切换主题逻辑
+  // 内部切换主题逻辑：system -> light -> sunny -> dark -> system
   const applyThemeToggle = () => {
-    if (mode.value === 'light') {
+    if (mode.value === 'system') {
+      mode.value = 'light'
+    } else if (mode.value === 'light') {
       mode.value = 'sunny'
     } else if (mode.value === 'sunny') {
       mode.value = 'dark'
     } else {
-      mode.value = 'light'
+      mode.value = 'system'
     }
 
     applyTheme()
@@ -81,16 +92,11 @@ export const useThemeStore = defineStore('themeStore', () => {
   }
 
   const applyTheme = () => {
-    switch (mode.value) {
-      case 'light':
-        theme.value = 'light'
-        break
-      case 'dark':
-        theme.value = 'dark'
-        break
-      case 'sunny':
-        theme.value = 'sunny'
-        break
+    // 跟随系统：忽略晴日，仅在浅色 / 深色之间切换
+    if (mode.value === 'system') {
+      theme.value = getSystemTheme()
+    } else {
+      theme.value = mode.value
     }
 
     document.documentElement.classList.remove('light', 'dark', 'sunny')
@@ -117,8 +123,25 @@ export const useThemeStore = defineStore('themeStore', () => {
     themeColorMeta.setAttribute('content', nextThemeColor)
   }
 
+  // 监听系统配色偏好变化：仅在 mode === 'system' 时同步生效，避免覆盖用户的手动选择
+  let systemMediaQuery: MediaQueryList | null = null
+  const handleSystemThemeChange = () => {
+    if (mode.value === 'system') {
+      applyTheme()
+    }
+  }
+
   const init = () => {
     applyTheme()
+
+    if (
+      !systemMediaQuery &&
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function'
+    ) {
+      systemMediaQuery = window.matchMedia(SYSTEM_DARK_QUERY)
+      systemMediaQuery.addEventListener('change', handleSystemThemeChange)
+    }
   }
 
   return {
