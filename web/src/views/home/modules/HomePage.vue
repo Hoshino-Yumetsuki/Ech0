@@ -30,7 +30,7 @@
 
         <template v-else-if="activeTab === 'home'">
           <HomeBanner :class="{ 'home-banner--mobile-hidden': shouldHideBannerOnMobile }" />
-          <TheEchos />
+          <TheEchos compact />
         </template>
 
         <div v-else-if="activeTab === 'status'" class="home-content-block home-status-widgets">
