@@ -7,22 +7,12 @@
       <TheFilter @open-palette="emit('openPalette')" />
     </div>
 
-    <!-- 常驻 widget：每个 widget 包在独立 surface card 里，与中栏 echo 卡片视觉一致 -->
-    <PanelCard border-style="solid" class="home-right-rail__widget">
-      <TheHeatMap />
-    </PanelCard>
-    <PanelCard border-style="solid" class="home-right-rail__widget">
-      <TheConnectWidget />
-    </PanelCard>
-    <PanelCard border-style="solid" class="home-right-rail__widget">
-      <TheCommentWidget />
-    </PanelCard>
-    <PanelCard v-if="AgentSetting.enable" border-style="solid" class="home-right-rail__widget">
-      <TheRecentCard />
-    </PanelCard>
-    <PanelCard border-style="solid" class="home-right-rail__widget">
-      <TheTagPileWidget />
-    </PanelCard>
+    <!-- 常驻 widget：每个 widget 自带视觉装饰，直接渲染避免 PanelCard 内边距裁剪 -->
+    <TheHeatMap />
+    <TheConnectWidget />
+    <TheCommentWidget />
+    <TheRecentCard v-if="AgentSetting.enable" />
+    <TheTagPileWidget />
 
     <!-- 底部 version + footer -->
     <div class="home-right-rail__footer">
@@ -55,7 +45,6 @@ import { computed, defineAsyncComponent } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useSettingStore } from '@/stores'
 import TheFilter from './TheFilter.vue'
-import PanelCard from '@/layout/PanelCard.vue'
 import {
   TheCommentWidget,
   TheConnectWidget,
@@ -84,7 +73,7 @@ const footerLink = computed(() => SystemSetting.value.footer_link)
 .home-right-rail {
   display: flex;
   flex-direction: column;
-  gap: 0.875rem;
+  gap: 1rem;
   padding: 1.25rem 0.5rem 1.5rem;
   min-width: 0;
 }
@@ -94,17 +83,11 @@ const footerLink = computed(() => SystemSetting.value.footer_link)
   padding: 0.25rem 0.25rem 0;
 }
 
-.home-right-rail__widget {
-  /* widget 内部已经有自己的 head 和 padding，这里把 PanelCard 的内边距压低 */
-  padding: 0.5rem !important;
-}
-
 .home-right-rail__footer {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
   padding: 0.25rem 0.75rem 0;
-  margin-top: auto;
 }
 
 .home-right-rail__version,

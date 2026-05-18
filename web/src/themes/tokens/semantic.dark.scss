@@ -2,17 +2,15 @@
   --selection-text-color: #413a1f;
   --selection-bg-color: #fdfdfd;
 
-  /* 翻转 dark 模式极性：canvas 极深、surface 明显抬亮，卡片在背景之上"浮起"；
-     符合内容平台习惯（Twitter / Mastodon / GitHub dark），与 light 一致地形成层次 */
-  --color-chrome-theme: #0a0907;
-  --color-bg-canvas: #0a0907;
-  --color-bg-surface: #2a2520;
-  --color-bg-muted: #34302a;
+  --color-chrome-theme: #333;
+  --color-bg-canvas: #333;
+  --color-bg-surface: #201d1b;
+  --color-bg-muted: #292623;
   --color-text-primary: #f0e9e0;
   --color-text-secondary: #cfcac4;
   --color-text-muted: #a29e99;
-  --color-border-subtle: #423d37;
-  --color-border-strong: #625c55;
+  --color-border-subtle: #3e3c3a;
+  --color-border-strong: #5e5a57;
   --color-accent: #e7b063;
   --color-accent-soft: #493e30;
   --color-danger: #fd6664;
@@ -37,15 +35,15 @@
   :root.dark {
     --selection-text-color: oklch(34.8% 0.043 95.3deg);
     --selection-bg-color: oklch(99.4% 0 0deg);
-    --color-chrome-theme: oklch(7.8% 0.005 60deg);
-    --color-bg-canvas: oklch(7.8% 0.005 60deg);
-    --color-bg-surface: oklch(28.6% 0.012 58deg);
-    --color-bg-muted: oklch(33.1% 0.012 60deg);
+    --color-chrome-theme: oklch(32.1% 0 0deg);
+    --color-bg-canvas: oklch(32.1% 0 0deg);
+    --color-bg-surface: oklch(23.2% 0.006 52.1deg);
+    --color-bg-muted: oklch(27.1% 0.007 58.4deg);
     --color-text-primary: oklch(93.8% 0.015 77.2deg);
     --color-text-secondary: oklch(84.2% 0.01 71.8deg);
     --color-text-muted: oklch(70.1% 0.009 70.2deg);
-    --color-border-subtle: oklch(36.5% 0.006 67.8deg);
-    --color-border-strong: oklch(48.5% 0.008 70.4deg);
+    --color-border-subtle: oklch(35.8% 0.005 67.8deg);
+    --color-border-strong: oklch(47.1% 0.007 70.4deg);
     --color-accent: oklch(79.2% 0.114 74.3deg);
     --color-accent-soft: oklch(37.2% 0.028 73.1deg);
     --color-danger: oklch(70.2% 0.185 23.9deg);

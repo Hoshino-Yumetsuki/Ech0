@@ -7,11 +7,7 @@
       <HomeLeftRail class="home-shell__left" />
 
       <!-- 中栏：主信息流 / 编辑器 / 标签 / 广场 / 状态 -->
-      <main
-        ref="mainColumn"
-        class="home-shell__main"
-        :class="{ 'home-shell__main--unclipped': activeTab === 'tags' }"
-      >
+      <main class="home-shell__main">
         <!-- 移动端品牌 + 导航：仅 <820px 显示 -->
         <div class="home-shell__mobile-top">
           <HomeHeader class="home-shell__mobile-header" />
@@ -34,29 +30,17 @@
 
         <template v-else-if="activeTab === 'home'">
           <HomeBanner :class="{ 'home-banner--mobile-hidden': shouldHideBannerOnMobile }" />
-          <TheEchos :scroll-target="mainColumn" />
+          <TheEchos />
         </template>
 
         <div v-else-if="activeTab === 'status'" class="home-content-block home-status-widgets">
-          <PanelCard border-style="solid" class="home-status-widgets__card">
-            <TheHeatMap />
-          </PanelCard>
-          <PanelCard
-            v-if="AgentSetting.enable"
-            border-style="solid"
-            class="home-status-widgets__card"
-          >
-            <TheRecentCard />
-          </PanelCard>
-          <PanelCard border-style="solid" class="home-status-widgets__card">
-            <TheConnectWidget />
-          </PanelCard>
-          <PanelCard border-style="solid" class="home-status-widgets__card">
-            <TheCommentWidget />
-          </PanelCard>
+          <TheHeatMap />
+          <TheRecentCard v-if="AgentSetting.enable" />
+          <TheConnectWidget />
+          <TheCommentWidget />
         </div>
 
-        <HubPage v-else embedded :scroll-target="mainColumn" />
+        <HubPage v-else embedded />
       </main>
 
       <!-- 右栏：搜索 + 常驻 widgets + version（≥1100px 显示） -->
@@ -74,7 +58,6 @@ import HomeLeftRail from './HomeLeftRail.vue'
 import HomeRightRail from './HomeRightRail.vue'
 import TheEchos from './TheEchos.vue'
 import TheCommandPalette from './TheCommandPalette.vue'
-import PanelCard from '@/layout/PanelCard.vue'
 import { defineAsyncComponent, onMounted, ref, onBeforeUnmount, computed, watch } from 'vue'
 import { useEchoStore, useUserStore, useSettingStore } from '@/stores'
 import { useRoute } from 'vue-router'
@@ -109,10 +92,7 @@ const shouldHideBannerOnMobile = computed(
   () => mobileSearchOpen.value || searchingMode.value || isFilteringMode.value,
 )
 
-const mainColumn = ref<HTMLElement | null>(null)
-const TIMELINE_SCROLL_KEY = 'home:timeline:scrollTop'
 const WINDOW_SCROLL_KEY = 'home:window:scrollTop'
-let timelineScrollRaf: number | null = null
 let windowScrollRaf: number | null = null
 
 const paletteOpen = ref<boolean>(false)
@@ -130,15 +110,6 @@ const handleGlobalKeydown = (event: KeyboardEvent) => {
   }
 }
 
-const saveTimelineScrollPosition = () => {
-  if (!mainColumn.value || timelineScrollRaf !== null) return
-  timelineScrollRaf = window.requestAnimationFrame(() => {
-    timelineScrollRaf = null
-    if (!mainColumn.value) return
-    sessionStorage.setItem(TIMELINE_SCROLL_KEY, String(mainColumn.value.scrollTop))
-  })
-}
-
 const saveWindowScrollPosition = () => {
   if (windowScrollRaf !== null) return
   windowScrollRaf = window.requestAnimationFrame(() => {
@@ -147,14 +118,7 @@ const saveWindowScrollPosition = () => {
   })
 }
 
-const restoreTimelineScrollPosition = () => {
-  if (mainColumn.value) {
-    const raw = sessionStorage.getItem(TIMELINE_SCROLL_KEY)
-    const scrollTop = raw ? Number(raw) : 0
-    if (Number.isFinite(scrollTop) && scrollTop > 0) {
-      mainColumn.value.scrollTop = scrollTop
-    }
-  }
+const restoreWindowScrollPosition = () => {
   const rawWindow = sessionStorage.getItem(WINDOW_SCROLL_KEY)
   const windowTop = rawWindow ? Number(rawWindow) : 0
   if (Number.isFinite(windowTop) && windowTop > 0) {
@@ -177,18 +141,15 @@ const prefetchHeavyChunks = () => {
 }
 
 onMounted(async () => {
-  if (mainColumn.value) {
-    mainColumn.value.scrollLeft = 0
-    mainColumn.value.addEventListener('scroll', saveTimelineScrollPosition, { passive: true })
-  }
   window.addEventListener('scroll', saveWindowScrollPosition, { passive: true })
+  // 等首批 echo 渲染后再恢复滚动位置，否则文档高度还没撑开，scrollY 会被夹到 0。
   const stopScrollRestoreWatch = watch(
     () => echoStore.echoList.length > 0 && !echoStore.isLoading,
     (ready) => {
       if (!ready) return
       stopScrollRestoreWatch()
       window.requestAnimationFrame(() => {
-        restoreTimelineScrollPosition()
+        restoreWindowScrollPosition()
       })
     },
     { immediate: true, flush: 'post' },
@@ -198,13 +159,6 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  if (mainColumn.value) {
-    mainColumn.value.removeEventListener('scroll', saveTimelineScrollPosition)
-  }
-  if (timelineScrollRaf !== null) {
-    window.cancelAnimationFrame(timelineScrollRaf)
-    timelineScrollRaf = null
-  }
   if (windowScrollRaf !== null) {
     window.cancelAnimationFrame(windowScrollRaf)
     windowScrollRaf = null
@@ -216,7 +170,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .home-page {
-  --home-canvas: var(--color-bg-canvas, #ebe6df);
+  --home-canvas: var(--color-bg-canvas, #f5f3ef);
   --home-rail-left: 15rem;
   --home-rail-right: 19rem;
   --home-main-max: 36rem;
@@ -224,14 +178,6 @@ onBeforeUnmount(() => {
   min-height: 100dvh;
   background: var(--home-canvas);
   color: var(--color-text-primary);
-}
-
-/* 桌面端：整个 home-page 视口高度，左右栏 sticky，中栏自滚 */
-@media (width >= 820px) {
-  .home-page {
-    height: 100dvh;
-    overflow: hidden;
-  }
 }
 
 /* === 移动端 (<820px)：单栏 === */
@@ -266,7 +212,7 @@ onBeforeUnmount(() => {
   padding-bottom: 2rem;
 }
 
-/* === 平板 (820-1099px)：左栏 + 中栏 === */
+/* === 平板 (820-1099px)：左栏 sticky + 中栏自然滚动 === */
 @media (width >= 820px) {
   .home-shell {
     display: grid;
@@ -274,28 +220,23 @@ onBeforeUnmount(() => {
     gap: 0;
     max-width: calc(var(--home-rail-left) + var(--home-main-max));
     padding: 0;
-    height: 100%;
+    align-items: start;
   }
 
   .home-shell__left {
     display: flex;
-    height: 100%;
+    position: sticky;
+    top: 0;
+    height: 100dvh;
     overflow-y: auto;
     overscroll-behavior: contain;
-    scrollbar-gutter: stable;
     border-right: 1px solid var(--color-border-subtle);
   }
 
+  /* 中栏跟随整页滚动；不再独立 overflow 容器 */
   .home-shell__main {
-    height: 100%;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    scrollbar-gutter: stable;
     padding: 1.25rem 1.5rem 2rem;
-  }
-
-  .home-shell__main--unclipped {
-    overflow: visible auto;
+    border-right: 1px solid var(--color-border-subtle);
   }
 
   /* 桌面布局下隐藏中栏顶部移动端品牌 */
@@ -304,20 +245,21 @@ onBeforeUnmount(() => {
   }
 }
 
-/* === 桌面 (≥1100px)：完整三栏 === */
+/* === 桌面 (≥1100px)：完整三栏，右栏自然跟随页面滚动 === */
 @media (width >= 1100px) {
   .home-shell {
     grid-template-columns: var(--home-rail-left) minmax(0, 1fr) var(--home-rail-right);
     max-width: calc(var(--home-rail-left) + var(--home-main-max) + var(--home-rail-right));
   }
 
+  .home-shell__main {
+    border-right: 1px solid var(--color-border-subtle);
+  }
+
+  /* 右栏不再 sticky / 独立滚动；与中栏一起跟随页面滚动 */
   .home-shell__right {
     display: flex;
-    height: 100%;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    scrollbar-gutter: stable;
-    border-left: 1px solid var(--color-border-subtle);
+    flex-direction: column;
   }
 }
 
@@ -334,10 +276,6 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-}
-
-.home-status-widgets__card {
-  padding: 0.5rem !important;
 }
 
 @media (width >= 768px) {
