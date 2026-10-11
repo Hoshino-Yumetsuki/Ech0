@@ -11,6 +11,11 @@ import (
 	model "github.com/lin-snow/ech0/internal/model/setting"
 )
 
+// errContentFiltered is a response the provider's content filter stopped
+// partway. What was streamed is not an answer, and passing it off as one would
+// hide why it ends where it does.
+var errContentFiltered = errors.New("模型输出被服务端内容过滤拦截，回答未完成（content_filter）")
+
 type Provider interface {
 	Complete(ctx context.Context, req Request) (Response, error)
 	Stream(ctx context.Context, req Request) (<-chan Event, error)

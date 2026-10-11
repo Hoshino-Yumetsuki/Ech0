@@ -67,7 +67,21 @@ type stubUserReader struct {
 	err  error
 }
 
-func (f *stubUserReader) GetUserByID(_ string) (userModel.User, error) { return f.user, f.err }
+// GetUserByID answers for the one user it holds; any other ID is unknown, as
+// it would be to the real store.
+func (f *stubUserReader) GetUserByID(id string) (userModel.User, error) {
+	if f.err != nil {
+		return userModel.User{}, f.err
+	}
+	if f.user.ID != "" && id != f.user.ID {
+		return userModel.User{}, errors.New("user not found")
+	}
+	return f.user, nil
+}
+
+func adminReader() *stubUserReader {
+	return &stubUserReader{user: userModel.User{ID: "u1", Username: "alice", IsAdmin: true}}
+}
 
 func singlePage(items []echoModel.Echo, total int64) func(commonModel.EchoQueryDto) (commonModel.PageQueryResult[[]echoModel.Echo], error) {
 	return func(dto commonModel.EchoQueryDto) (commonModel.PageQueryResult[[]echoModel.Echo], error) {
@@ -181,12 +195,73 @@ func TestSearchEchosTool_SemanticPath(t *testing.T) {
 	if !emb.searchSeen {
 		t.Fatalf("expected embedding.Search to be used for pure-query path")
 	}
-	if emb.gotAuthor != "alice" {
-		t.Fatalf("semantic search must scope by username, got author=%q", emb.gotAuthor)
+	if emb.gotAuthor != "u1" {
+		t.Fatalf("semantic search must scope by the author's user ID (usernames change), got %q", emb.gotAuthor)
 	}
 	results, ok := out.Meta.([]embeddingModel.SearchResult)
 	if !ok || len(results) != 1 || results[0].EchoID != "e1" {
 		t.Fatalf("unexpected results: %#v", out.Meta)
+	}
+}
+
+// The semantic index can be on but unbuilt, mid-rebuild or built for another
+// model. None of that may turn into "no such record" when keyword search would
+// find the Echo.
+func TestSearchEchosTool_SemanticShortfallFallsBackToKeyword(t *testing.T) {
+	keywordHits := commonModel.PageQueryResult[[]echoModel.Echo]{
+		Items: []echoModel.Echo{
+			{ID: "e1", Content: "both", CreatedAt: ts("2026-02-01")},
+			{ID: "e2", Content: "keyword only", CreatedAt: ts("2026-02-02")},
+		},
+		Total: 2,
+	}
+	echoSvc := &stubEchoSvc{
+		queryFn: func(commonModel.EchoQueryDto) (commonModel.PageQueryResult[[]echoModel.Echo], error) {
+			return keywordHits, nil
+		},
+		getByIDFn: func(id string) (*echoModel.Echo, error) { return &echoModel.Echo{ID: id}, nil },
+	}
+
+	cases := map[string]func(string, int, string) ([]embeddingModel.SearchResult, error){
+		"index error": func(string, int, string) ([]embeddingModel.SearchResult, error) {
+			return nil, errors.New("no such table: vec_echo")
+		},
+		"empty index": func(string, int, string) ([]embeddingModel.SearchResult, error) { return nil, nil },
+		"partial index": func(string, int, string) ([]embeddingModel.SearchResult, error) {
+			return []embeddingModel.SearchResult{{EchoID: "e1", Content: "both"}}, nil
+		},
+	}
+	for name, fn := range cases {
+		t.Run(name, func(t *testing.T) {
+			s := &CopilotService{echoService: echoSvc, embedding: &stubEmbeddingSvc{enabled: true, searchFn: fn}}
+			tool := s.searchEchosTool(nil, false, "zh-CN", time.UTC, 0, newSearchUser())
+
+			out, err := tool.Run(context.Background(), mustArgs(t, searchArgs{Query: "x"}))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			results := out.Meta.([]embeddingModel.SearchResult)
+			if len(results) != 2 || results[0].EchoID != "e1" || results[1].EchoID != "e2" {
+				t.Fatalf("want semantic hits first, topped up from keyword without duplicates, got %+v", results)
+			}
+		})
+	}
+}
+
+func TestSearchEchosTool_UnknownTagIsAnError(t *testing.T) {
+	queried := false
+	echoSvc := &stubEchoSvc{queryFn: func(commonModel.EchoQueryDto) (commonModel.PageQueryResult[[]echoModel.Echo], error) {
+		queried = true
+		return commonModel.PageQueryResult[[]echoModel.Echo]{}, nil
+	}}
+	s := &CopilotService{echoService: echoSvc, embedding: &stubEmbeddingSvc{}}
+	tool := s.searchEchosTool([]echoModel.Tag{{ID: "t1", Name: "读书"}}, false, "zh-CN", time.UTC, 0, newSearchUser())
+
+	if _, err := tool.Run(context.Background(), mustArgs(t, searchArgs{Tags: []string{"阅读"}})); err == nil {
+		t.Fatalf("an unknown tag must not silently become an unfiltered search")
+	}
+	if queried {
+		t.Fatalf("no query should run once the filter cannot be honoured")
 	}
 }
 
@@ -274,7 +349,7 @@ func TestStatsOverviewTool_CollectErrorPropagates(t *testing.T) {
 
 func TestSummarizeEchosTool_NeedsDateRange(t *testing.T) {
 	s := &CopilotService{echoService: &stubEchoSvc{}}
-	tool := s.summarizeEchosTool(nil, settingModel.AgentSetting{}, "zh-CN", time.UTC, newSearchUser())
+	tool := s.summarizeEchosTool(nil, settingModel.AgentSetting{}, 0, "zh-CN", time.UTC, newSearchUser())
 
 	_, err := tool.Run(context.Background(), mustArgs(t, summarizeArgs{}))
 	if err == nil || !strings.Contains(err.Error(), "summarize_echos 需要") {
@@ -288,7 +363,7 @@ func TestSummarizeEchosTool_HappyPathFitsBudget(t *testing.T) {
 		{ID: "b", Content: "二月旅行", CreatedAt: ts("2026-02-10")},
 	}
 	s := &CopilotService{echoService: &stubEchoSvc{queryFn: singlePage(items, int64(len(items)))}}
-	tool := s.summarizeEchosTool(nil, settingModel.AgentSetting{}, "zh-CN", time.UTC, newSearchUser())
+	tool := s.summarizeEchosTool(nil, settingModel.AgentSetting{}, 0, "zh-CN", time.UTC, newSearchUser())
 
 	out, err := tool.Run(context.Background(), mustArgs(t, summarizeArgs{
 		DateFrom: "2026-01-01", DateTo: "2026-02-28", Focus: "工作",
@@ -319,7 +394,7 @@ func TestSummarizeEchosTool_CollectErrorPropagates(t *testing.T) {
 	s := &CopilotService{echoService: &stubEchoSvc{queryFn: func(commonModel.EchoQueryDto) (commonModel.PageQueryResult[[]echoModel.Echo], error) {
 		return commonModel.PageQueryResult[[]echoModel.Echo]{}, wantErr
 	}}}
-	tool := s.summarizeEchosTool(nil, settingModel.AgentSetting{}, "zh-CN", time.UTC, newSearchUser())
+	tool := s.summarizeEchosTool(nil, settingModel.AgentSetting{}, 0, "zh-CN", time.UTC, newSearchUser())
 
 	_, err := tool.Run(context.Background(), mustArgs(t, summarizeArgs{DateFrom: "2026-01-01", DateTo: "2026-02-28"}))
 	if !errors.Is(err, wantErr) {

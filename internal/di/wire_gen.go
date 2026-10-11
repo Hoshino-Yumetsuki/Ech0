@@ -7,8 +7,8 @@
 package di
 
 import (
+	"context"
 	"github.com/google/wire"
-	"github.com/lin-snow/ech0/internal/app"
 	"github.com/lin-snow/ech0/internal/cache"
 	"github.com/lin-snow/ech0/internal/database"
 	"github.com/lin-snow/ech0/internal/event/bus"
@@ -65,12 +65,14 @@ import (
 	service10 "github.com/lin-snow/ech0/internal/service/migrator"
 	service7 "github.com/lin-snow/ech0/internal/service/setting"
 	service3 "github.com/lin-snow/ech0/internal/service/user"
+	"github.com/lin-snow/ech0/internal/setting"
 	"github.com/lin-snow/ech0/internal/storage"
 	"github.com/lin-snow/ech0/internal/task"
 	"github.com/lin-snow/ech0/internal/task/scheduled"
 	"github.com/lin-snow/ech0/internal/transaction"
 	"github.com/lin-snow/ech0/internal/visitor"
 	"github.com/lin-snow/ech0/internal/webhook"
+	"github.com/lin-snow/ech0/pkg/app"
 	"github.com/lin-snow/ech0/pkg/busen"
 	"gorm.io/gorm"
 )
@@ -80,43 +82,42 @@ import (
 func BuildApp() (*app.App, error) {
 	v := database.ProvideDBProvider()
 	v2 := bus.ProvideProvider()
-	iCache, err := cache.ProvideCache()
+	cacheCache, err := cache.ProvideCache()
 	if err != nil {
 		return nil, err
 	}
 	gormTransactor := transaction.NewGormTransactor(v)
-	eventRegistrar, err := BuildEventRegistrar(v, v2, iCache, gormTransactor)
+	eventRegistrar, err := BuildEventRegistrar(v, v2, cacheCache, gormTransactor)
 	if err != nil {
 		return nil, err
 	}
-	keyValueRepository := keyvalue.NewKeyValueRepository(v, iCache)
+	keyValueRepository := keyvalue.NewKeyValueRepository(v, cacheCache)
 	store := ProvideStorageKV(keyValueRepository)
 	manager := storage.ProvideStorageManager(store)
-	jobManager, err := BuildJobManager(v, iCache, manager, v2, gormTransactor)
+	jobManager, err := BuildJobManager(v, cacheCache, manager, v2, gormTransactor)
 	if err != nil {
 		return nil, err
 	}
 	tracker := visitor.NewTracker()
-	taskManager, err := BuildTasker(v, iCache, gormTransactor, v2, tracker, manager)
+	taskManager, err := BuildTasker(v, cacheCache, gormTransactor, v2, tracker, manager)
 	if err != nil {
 		return nil, err
 	}
 	engine := server.ProvideGinEngine()
-	bundle, err := BuildHandlers(v, iCache, gormTransactor, v2, tracker, jobManager, manager)
+	bundle, err := BuildHandlers(v, cacheCache, gormTransactor, v2, tracker, jobManager, manager)
 	if err != nil {
 		return nil, err
 	}
-	deps, err := BuildMiddlewares(v, iCache)
+	deps, err := BuildMiddlewares(v, cacheCache)
 	if err != nil {
 		return nil, err
 	}
 	serverServer := server.ProvideHTTPServer(engine, bundle, deps)
-	v3 := app.ProvideOptions(eventRegistrar, jobManager, taskManager, serverServer, store)
-	appApp := app.NewApp(v3)
+	appApp := ProvideApp(eventRegistrar, jobManager, taskManager, serverServer, store)
 	return appApp, nil
 }
 
-func BuildEventRegistrar(dbProvider func() *gorm.DB, ebProvider func() *busen.Bus, appCache cache.ICache[string, any], tx transaction.Transactor) (*bus.EventRegistrar, error) {
+func BuildEventRegistrar(dbProvider func() *gorm.DB, ebProvider func() *busen.Bus, appCache *cache.Cache, tx transaction.Transactor) (*bus.EventRegistrar, error) {
 	keyValueRepository := keyvalue.NewKeyValueRepository(dbProvider, appCache)
 	persistent := kvstore.NewPersistent(keyValueRepository)
 	agentProcessor := subscriber.NewAgentProcessor(persistent)
@@ -131,7 +132,7 @@ func BuildEventRegistrar(dbProvider func() *gorm.DB, ebProvider func() *busen.Bu
 	return eventRegistrar, nil
 }
 
-func BuildHandlers(dbProvider func() *gorm.DB, appCache cache.ICache[string, any], tx transaction.Transactor, ebProvider func() *busen.Bus, tracker *visitor.Tracker, jobManager *job.Manager, storageManager *storage.Manager) (*handler.Bundle, error) {
+func BuildHandlers(dbProvider func() *gorm.DB, appCache *cache.Cache, tx transaction.Transactor, ebProvider func() *busen.Bus, tracker *visitor.Tracker, jobManager *job.Manager, storageManager *storage.Manager) (*handler.Bundle, error) {
 	webHandler := handler2.NewWebHandler(tracker)
 	userRepository := repository4.NewUserRepository(dbProvider, appCache)
 	keyValueRepository := keyvalue.NewKeyValueRepository(dbProvider, appCache)
@@ -179,7 +180,7 @@ func BuildHandlers(dbProvider func() *gorm.DB, appCache cache.ICache[string, any
 	return bundle, nil
 }
 
-func BuildJobManager(dbProvider func() *gorm.DB, appCache cache.ICache[string, any], storageManager *storage.Manager, ebProvider func() *busen.Bus, tx transaction.Transactor) (*job.Manager, error) {
+func BuildJobManager(dbProvider func() *gorm.DB, appCache *cache.Cache, storageManager *storage.Manager, ebProvider func() *busen.Bus, tx transaction.Transactor) (*job.Manager, error) {
 	jobRepository := repository12.NewJobRepository(dbProvider)
 	embeddingRepository := repository.NewEmbeddingRepository(dbProvider)
 	keyValueRepository := keyvalue.NewKeyValueRepository(dbProvider, appCache)
@@ -197,7 +198,7 @@ func BuildJobManager(dbProvider func() *gorm.DB, appCache cache.ICache[string, a
 	return manager, nil
 }
 
-func BuildMiddlewares(dbProvider func() *gorm.DB, appCache cache.ICache[string, any]) (*middleware.Deps, error) {
+func BuildMiddlewares(dbProvider func() *gorm.DB, appCache *cache.Cache) (*middleware.Deps, error) {
 	authRepository := repository7.NewAuthRepository(dbProvider, appCache)
 	deps := middleware.NewDeps(authRepository)
 	return deps, nil
@@ -206,25 +207,25 @@ func BuildMiddlewares(dbProvider func() *gorm.DB, appCache cache.ICache[string, 
 func BuildServer() (*server.Server, error) {
 	engine := server.ProvideGinEngine()
 	v := database.ProvideDBProvider()
-	iCache, err := cache.ProvideCache()
+	cacheCache, err := cache.ProvideCache()
 	if err != nil {
 		return nil, err
 	}
 	gormTransactor := transaction.NewGormTransactor(v)
 	v2 := bus.ProvideProvider()
 	tracker := visitor.NewTracker()
-	keyValueRepository := keyvalue.NewKeyValueRepository(v, iCache)
+	keyValueRepository := keyvalue.NewKeyValueRepository(v, cacheCache)
 	store := ProvideStorageKV(keyValueRepository)
 	manager := storage.ProvideStorageManager(store)
-	jobManager, err := BuildJobManager(v, iCache, manager, v2, gormTransactor)
+	jobManager, err := BuildJobManager(v, cacheCache, manager, v2, gormTransactor)
 	if err != nil {
 		return nil, err
 	}
-	bundle, err := BuildHandlers(v, iCache, gormTransactor, v2, tracker, jobManager, manager)
+	bundle, err := BuildHandlers(v, cacheCache, gormTransactor, v2, tracker, jobManager, manager)
 	if err != nil {
 		return nil, err
 	}
-	deps, err := BuildMiddlewares(v, iCache)
+	deps, err := BuildMiddlewares(v, cacheCache)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +233,7 @@ func BuildServer() (*server.Server, error) {
 	return serverServer, nil
 }
 
-func BuildTasker(dbProvider func() *gorm.DB, appCache cache.ICache[string, any], tx transaction.Transactor, ebProvider func() *busen.Bus, tracker *visitor.Tracker, storageManager *storage.Manager) (*task.Manager, error) {
+func BuildTasker(dbProvider func() *gorm.DB, appCache *cache.Cache, tx transaction.Transactor, ebProvider func() *busen.Bus, tracker *visitor.Tracker, storageManager *storage.Manager) (*task.Manager, error) {
 	commonRepository := repository5.NewCommonRepository(dbProvider)
 	fileRepository := repository6.NewFileRepository(dbProvider)
 	fileService := service2.NewFileService(tx, commonRepository, fileRepository, storageManager, ebProvider)
@@ -252,7 +253,28 @@ func BuildTasker(dbProvider func() *gorm.DB, appCache cache.ICache[string, any],
 
 // wire.go:
 
-var AppSet = app.ProviderSet
+var AppSet = wire.NewSet(ProvideApp)
+
+// ProvideApp composes Ech0's runtime on the generic app lifecycle: components
+// start in order job → task → server; settings are seeded and event
+// subscriptions registered before any of them, and torn down after all stop.
+func ProvideApp(
+	registrar *bus.EventRegistrar,
+	jobManager *job.Manager,
+	taskManager *task.Manager,
+	httpServer *server.Server,
+	durableKV kvstore.Store,
+) *app.App {
+	return app.New(app.Components(jobManager, taskManager, httpServer), app.BeforeStart(func(ctx context.Context) error {
+		if err := setting.Seed(ctx, durableKV); err != nil {
+			return err
+		}
+		return registrar.Register()
+	}), app.AfterStop(func(context.Context) error {
+		return registrar.Stop()
+	}),
+	)
+}
 
 var VisitorSet = wire.NewSet(visitor.NewTracker)
 
@@ -263,9 +285,9 @@ func ProvideJobManager(
 	export *runner.ExportRunner,
 ) *job.Manager {
 	m := job.NewManager(repo)
-	m.Register(model.TypeReindex, job.Adapt(reindex.Run))
-	m.Register(model.TypeMigration, job.Adapt(migration.Run))
-	m.Register(model.TypeExport, job.Adapt(export.Run))
+	m.Register(model.Reindex, reindex.Run)
+	m.Register(model.Migration, migration.Run)
+	m.Register(model.Export, export.Run)
 	return m
 }
 

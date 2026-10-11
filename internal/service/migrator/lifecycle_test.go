@@ -83,9 +83,7 @@ func (r *fakeJobRepo) seed(j jobModel.Job) {
 	r.jobs[j.Type] = j
 }
 
-type noopRunner struct{}
-
-func (noopRunner) Run(context.Context, []byte, job.ReportFunc) (any, error) { return nil, nil }
+func noopRun[P any](context.Context, P, job.ReportFunc) (any, error) { return nil, nil }
 
 func newService(common CommonService, repo *fakeJobRepo, bus *busen.Bus) *MigratorService {
 	return NewMigratorService(common, job.NewManager(repo), func() *busen.Bus { return bus })
@@ -150,9 +148,9 @@ func TestStartGlobalMigration(t *testing.T) {
 		common := commonmock.NewMockService(t)
 		expectUser(t, common, adminUser(), nil)
 		repo := newFakeJobRepo()
-		repo.seed(jobModel.Job{Type: jobModel.TypeMigration, Status: jobModel.StatusRunning})
+		repo.seed(jobModel.Job{Type: string(jobModel.Migration), Status: jobModel.StatusRunning})
 		s := newService(common, repo, nil)
-		s.jobManager.Register(jobModel.TypeMigration, noopRunner{})
+		s.jobManager.Register(jobModel.Migration, noopRun)
 		_, err := s.StartGlobalMigration(helpers.CtxAsUser(adminID), validReq())
 		require.Error(t, err)
 		assert.Equal(t, "请先结束/清理当前迁移", err.Error())
@@ -163,7 +161,7 @@ func TestStartGlobalMigration(t *testing.T) {
 		expectUser(t, common, adminUser(), nil)
 		repo := newFakeJobRepo()
 		s := newService(common, repo, nil)
-		s.jobManager.Register(jobModel.TypeMigration, noopRunner{})
+		s.jobManager.Register(jobModel.Migration, noopRun)
 
 		dto, err := s.StartGlobalMigration(helpers.CtxAsUser(adminID), validReq())
 		require.NoError(t, err)
@@ -199,7 +197,7 @@ func TestGetGlobalMigrationStatus(t *testing.T) {
 		common := commonmock.NewMockService(t)
 		expectUser(t, common, adminUser(), nil)
 		repo := newFakeJobRepo()
-		repo.seed(jobModel.Job{Type: jobModel.TypeMigration, Status: jobModel.StatusSuccess})
+		repo.seed(jobModel.Job{Type: string(jobModel.Migration), Status: jobModel.StatusSuccess})
 		s := newService(common, repo, nil)
 		dto, err := s.GetGlobalMigrationStatus(helpers.CtxAsUser(adminID))
 		require.NoError(t, err)
@@ -239,7 +237,7 @@ func TestCancelGlobalMigration(t *testing.T) {
 		common := commonmock.NewMockService(t)
 		expectUser(t, common, adminUser(), nil)
 		repo := newFakeJobRepo()
-		repo.seed(jobModel.Job{Type: jobModel.TypeMigration, Status: jobModel.StatusSuccess})
+		repo.seed(jobModel.Job{Type: string(jobModel.Migration), Status: jobModel.StatusSuccess})
 		s := newService(common, repo, nil)
 		_, err := s.CancelGlobalMigration(helpers.CtxAsUser(adminID))
 		assert.Equal(t, commonModel.INVALID_REQUEST_BODY, err.Error())
@@ -249,7 +247,7 @@ func TestCancelGlobalMigration(t *testing.T) {
 		common := commonmock.NewMockService(t)
 		expectUser(t, common, adminUser(), nil)
 		repo := newFakeJobRepo()
-		repo.seed(jobModel.Job{Type: jobModel.TypeMigration, Status: jobModel.StatusRunning})
+		repo.seed(jobModel.Job{Type: string(jobModel.Migration), Status: jobModel.StatusRunning})
 		s := newService(common, repo, nil)
 		dto, err := s.CancelGlobalMigration(helpers.CtxAsUser(adminID))
 		require.NoError(t, err)
@@ -277,7 +275,7 @@ func TestCleanupGlobalMigration(t *testing.T) {
 		common := commonmock.NewMockService(t)
 		expectUser(t, common, adminUser(), nil)
 		repo := newFakeJobRepo()
-		repo.seed(jobModel.Job{Type: jobModel.TypeMigration, Status: jobModel.StatusPending})
+		repo.seed(jobModel.Job{Type: string(jobModel.Migration), Status: jobModel.StatusPending})
 		s := newService(common, repo, nil)
 		err := s.CleanupGlobalMigration(helpers.CtxAsUser(adminID))
 		require.Error(t, err)
@@ -289,13 +287,13 @@ func TestCleanupGlobalMigration(t *testing.T) {
 		expectUser(t, common, adminUser(), nil)
 		repo := newFakeJobRepo()
 		repo.seed(jobModel.Job{
-			Type:    jobModel.TypeMigration,
+			Type:    string(jobModel.Migration),
 			Status:  jobModel.StatusSuccess,
 			Payload: `{"source_type":"ech0","source_payload":{"tmp_dir":"files/tmp/ech0_done"}}`,
 		})
 		s := newService(common, repo, nil)
 		require.NoError(t, s.CleanupGlobalMigration(helpers.CtxAsUser(adminID)))
-		_, err := repo.GetByType(context.Background(), jobModel.TypeMigration)
+		_, err := repo.GetByType(context.Background(), string(jobModel.Migration))
 		assert.ErrorIs(t, err, job.ErrNotFound)
 	})
 
@@ -333,9 +331,9 @@ func TestStartExport(t *testing.T) {
 		common := commonmock.NewMockService(t)
 		expectUser(t, common, adminUser(), nil)
 		repo := newFakeJobRepo()
-		repo.seed(jobModel.Job{Type: jobModel.TypeExport, Status: jobModel.StatusRunning})
+		repo.seed(jobModel.Job{Type: string(jobModel.Export), Status: jobModel.StatusRunning})
 		s := newService(common, repo, nil)
-		s.jobManager.Register(jobModel.TypeExport, noopRunner{})
+		s.jobManager.Register(jobModel.Export, noopRun)
 		_, err := s.StartExport(helpers.CtxAsUser(adminID), migratorModel.StartExportRequest{})
 		require.Error(t, err)
 		assert.Equal(t, "导出进行中，请稍候", err.Error())
@@ -346,7 +344,7 @@ func TestStartExport(t *testing.T) {
 		expectUser(t, common, adminUser(), nil)
 		repo := newFakeJobRepo()
 		s := newService(common, repo, nil)
-		s.jobManager.Register(jobModel.TypeExport, noopRunner{})
+		s.jobManager.Register(jobModel.Export, noopRun)
 		dto, err := s.StartExport(helpers.CtxAsUser(adminID), migratorModel.StartExportRequest{})
 		require.NoError(t, err)
 		assert.Equal(t, 1, dto.Version)
@@ -377,7 +375,7 @@ func TestGetExportStatus(t *testing.T) {
 		expectUser(t, common, adminUser(), nil)
 		repo := newFakeJobRepo()
 		repo.seed(jobModel.Job{
-			Type:    jobModel.TypeExport,
+			Type:    string(jobModel.Export),
 			Status:  jobModel.StatusSuccess,
 			Payload: `{"file_name":"snap.zip","size":2048}`,
 		})
@@ -421,7 +419,7 @@ func TestCancelExport(t *testing.T) {
 		common := commonmock.NewMockService(t)
 		expectUser(t, common, adminUser(), nil)
 		repo := newFakeJobRepo()
-		repo.seed(jobModel.Job{Type: jobModel.TypeExport, Status: jobModel.StatusFailed})
+		repo.seed(jobModel.Job{Type: string(jobModel.Export), Status: jobModel.StatusFailed})
 		s := newService(common, repo, nil)
 		_, err := s.CancelExport(helpers.CtxAsUser(adminID))
 		assert.Equal(t, commonModel.INVALID_REQUEST_BODY, err.Error())
@@ -431,7 +429,7 @@ func TestCancelExport(t *testing.T) {
 		common := commonmock.NewMockService(t)
 		expectUser(t, common, adminUser(), nil)
 		repo := newFakeJobRepo()
-		repo.seed(jobModel.Job{Type: jobModel.TypeExport, Status: jobModel.StatusRunning})
+		repo.seed(jobModel.Job{Type: string(jobModel.Export), Status: jobModel.StatusRunning})
 		s := newService(common, repo, nil)
 		dto, err := s.CancelExport(helpers.CtxAsUser(adminID))
 		require.NoError(t, err)
@@ -602,7 +600,7 @@ func TestUploadSourceZip(t *testing.T) {
 		common := commonmock.NewMockService(t)
 		expectUser(t, common, adminUser(), nil)
 		repo := newFakeJobRepo()
-		repo.seed(jobModel.Job{Type: jobModel.TypeMigration, Status: jobModel.StatusSuccess})
+		repo.seed(jobModel.Job{Type: string(jobModel.Migration), Status: jobModel.StatusSuccess})
 		s := newService(common, repo, nil)
 		_, err := s.UploadSourceZip(
 			helpers.CtxAsUser(adminID),

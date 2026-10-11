@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.build/
+renders/
+assets/*.wav
+evidence/stills/
+evidence/probe/
+evidence/component-imports.json
+evidence/environment.json

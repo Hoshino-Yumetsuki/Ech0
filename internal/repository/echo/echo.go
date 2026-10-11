@@ -21,14 +21,14 @@ import (
 
 type EchoRepository struct {
 	db    func() *gorm.DB
-	cache cache.ICache[string, any]
+	cache *cache.Cache
 }
 
 var _ echoService.Repository = (*EchoRepository)(nil)
 
 func NewEchoRepository(
 	dbProvider func() *gorm.DB,
-	cache cache.ICache[string, any],
+	cache *cache.Cache,
 ) *EchoRepository {
 	return &EchoRepository{db: dbProvider, cache: cache}
 }
@@ -66,8 +66,7 @@ func (echoRepository *EchoRepository) GetEchosByPage(
 	showPrivate bool,
 ) ([]model.Echo, int64) {
 	cacheKey := GetEchoPageCacheKey(page, pageSize, search, showPrivate)
-	pageResult, err := cache.ReadThroughTyped[commonModel.PageQueryResult[[]model.Echo]](
-		echoRepository.cache,
+	pageResult, err := echoRepository.cache.ReadThrough(
 		cacheKey,
 		1,
 		func() (commonModel.PageQueryResult[[]model.Echo], error) {
@@ -112,9 +111,8 @@ func (echoRepository *EchoRepository) GetEchosByPage(
 
 func (echoRepository *EchoRepository) GetEchosById(ctx context.Context, id string) (*model.Echo, error) {
 	cacheKey := GetEchoByIDCacheKey(id)
-	echo, err := cache.ReadThroughTypedUnlessTx[*model.Echo](
+	echo, err := echoRepository.cache.ReadThroughUnlessTx(
 		ctx,
-		echoRepository.cache,
 		cacheKey,
 		1,
 		func(ctx context.Context) (*model.Echo, error) {
@@ -181,8 +179,7 @@ func (echoRepository *EchoRepository) GetTodayEchos(showPrivate bool, timezone s
 	normalizedTimezone := timezoneUtil.NormalizeTimezone(timezone)
 
 	cacheKey := GetTodayEchosCacheKey(showPrivate, normalizedTimezone)
-	todayEchos, err := cache.ReadThroughTypedWithStore[[]model.Echo](
-		echoRepository.cache,
+	todayEchos, err := echoRepository.cache.ReadThroughWithStore(
 		cacheKey,
 		func(echos []model.Echo) {
 			loc := timezoneUtil.LoadLocationOrUTC(normalizedTimezone)

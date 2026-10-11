@@ -26,7 +26,7 @@ func NewAgentProcessor(
 }
 
 func (ap *AgentProcessor) handle(ctx context.Context) error {
-	if _, err := coreSetting.Get(ctx, ap.durableKV, coreSetting.Agent); err != nil {
+	if _, err := coreSetting.Agent.Get(ctx, ap.durableKV); err != nil {
 		return err
 	}
 	return ap.clearCache()
@@ -38,6 +38,11 @@ func (ap *AgentProcessor) HandleEchoCreated(ctx context.Context, e event.EchoCre
 }
 
 func (ap *AgentProcessor) HandleEchoUpdated(ctx context.Context, e event.EchoUpdated) error {
+	_ = e
+	return ap.handle(ctx)
+}
+
+func (ap *AgentProcessor) HandleEchoDeleted(ctx context.Context, e event.EchoDeleted) error {
 	_ = e
 	return ap.handle(ctx)
 }
@@ -55,6 +60,7 @@ func (ap *AgentProcessor) Registrations() []eventbus.Registration {
 	return []eventbus.Registration{
 		eventbus.On(ap.HandleEchoCreated, eventbus.AsyncParallel()...),
 		eventbus.On(ap.HandleEchoUpdated, eventbus.AsyncParallel()...),
+		eventbus.On(ap.HandleEchoDeleted, eventbus.AsyncParallel()...),
 		eventbus.On(ap.HandleUserDeleted, eventbus.AsyncParallel()...),
 	}
 }

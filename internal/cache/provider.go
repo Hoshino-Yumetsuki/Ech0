@@ -5,8 +5,12 @@ package cache
 
 import "github.com/google/wire"
 
-func ProvideCache() (ICache[string, any], error) {
-	return NewCache[string, any]()
+func ProvideCache() (*Cache, error) {
+	backend, err := NewRistrettoCache[string, any](1000000, 1000000, 100)
+	if err != nil {
+		return nil, err
+	}
+	return New(backend), nil
 }
 
 var ProviderSet = wire.NewSet(ProvideCache)

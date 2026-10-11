@@ -20,7 +20,12 @@ import (
 
 func respMarshalParams(t *testing.T, req Request) map[string]any {
 	t.Helper()
-	p := &openaiResponsesProvider{setting: model.AgentSetting{Model: "gpt-5"}}
+	return respMarshalParamsWith(t, model.AgentSetting{Model: "gpt-4.1"}, req)
+}
+
+func respMarshalParamsWith(t *testing.T, setting model.AgentSetting, req Request) map[string]any {
+	t.Helper()
+	p := &openaiResponsesProvider{setting: setting}
 	params, err := p.buildParams(req)
 	if err != nil {
 		t.Fatalf("buildParams failed: %v", err)
@@ -99,12 +104,10 @@ func TestResponsesBuildInput_WireShape(t *testing.T) {
 }
 
 func TestResponsesBuildParams_ToolsAndOptions(t *testing.T) {
-	temp := float32(0.4)
-	body := respMarshalParams(t, Request{
-		Messages:    []Message{{Role: RoleUser, Content: "hi"}},
-		Tools:       []ToolDef{{Name: "search_echos", Description: "检索", Parameters: []byte(`{"type":"object"}`)}},
-		Temperature: &temp,
-		MaxTokens:   128,
+	temp := 0.4
+	body := respMarshalParamsWith(t, model.AgentSetting{Model: "gpt-4.1", Temperature: &temp}, Request{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+		Tools:    []ToolDef{{Name: "search_echos", Description: "检索", Parameters: []byte(`{"type":"object"}`)}},
 	})
 
 	tools, ok := body["tools"].([]any)
@@ -125,10 +128,10 @@ func TestResponsesBuildParams_ToolsAndOptions(t *testing.T) {
 		t.Fatalf("parameters should carry the JSON Schema, got %v", tool["parameters"])
 	}
 
-	if body["max_output_tokens"] != float64(128) {
-		t.Fatalf("max_output_tokens = %v, want 128", body["max_output_tokens"])
+	if _, has := body["max_output_tokens"]; has {
+		t.Fatalf("no output ceiling should be sent, got %v", body["max_output_tokens"])
 	}
-	if body["temperature"] != float64(float32(0.4)) {
+	if body["temperature"] != 0.4 {
 		t.Fatalf("temperature = %v", body["temperature"])
 	}
 	if body["store"] != false {
@@ -341,8 +344,7 @@ func TestResponsesComplete_AggregatesOutputText(t *testing.T) {
 	})
 
 	resp, err := srv.provider().Complete(context.Background(), Request{
-		Messages:  []Message{{Role: RoleUser, Content: "ping"}},
-		MaxTokens: 16,
+		Messages: []Message{{Role: RoleUser, Content: "ping"}},
 	})
 	if err != nil {
 		t.Fatalf("Complete failed: %v", err)

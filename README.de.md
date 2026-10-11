@@ -4,7 +4,7 @@
 
 # Ech0
 
-[Vorschau](https://memo.vaaat.com/) · [Offizielle Seite & Dokumentation](https://www.ech0.app/) · [Releases](https://lin-snow.github.io/Ech0/) · [Ech0 Hub](https://hub.ech0.app/)
+[Vorschau](https://memo.sn0w.fyi/) · [Offizielle Seite & Dokumentation](https://www.ech0.app/) · [Releases](https://lin-snow.github.io/Ech0/) · [Ech0 Hub](https://hub.ech0.app/)
 
 <a title="en-US" href="./README.md"><img src="https://img.shields.io/badge/-English-545759?style=for-the-badge" alt="English"></a> <a title="zh" href="./README.zh.md"><img src="https://img.shields.io/badge/-简体中文-545759?style=for-the-badge" alt="简体中文"></a> <img src="https://img.shields.io/badge/-Deutsch-F54A00?style=for-the-badge" alt="Deutsch"> <a title="ja" href="./README.ja.md"><img src="https://img.shields.io/badge/-日本語-545759?style=for-the-badge" alt="日本語"></a>
 
@@ -192,7 +192,7 @@ Für den schnellsten Einstieg reicht der oben gezeigte [In 60 Sekunden ausprobie
    Ech0 verwendet derzeit ein leichtgewichtiges Rollenmodell (Owner / Admin / regulärer Nutzer), um den Betrieb einfach und vorhersehbar zu halten. Das Rechtemodell wird auf Basis von Community-Feedback weiterentwickelt.
 
 8. **Warum sehen andere mein Connect-Avatar nicht?**
-   Setze die URL deiner aktuellen Instanz in `Systemeinstellungen — Service-URL`, z. B. `https://memo.vaaat.com` (mit `http://` oder `https://`).
+   Setze die URL deiner aktuellen Instanz in `Systemeinstellungen — Service-URL`, z. B. `https://memo.sn0w.fyi/` (mit `http://` oder `https://`).
 
 9. **Was ist die Option MetingAPI in den Einstellungen?**
    Das ist der API-Endpunkt, den Music-Cards verwenden, um abspielbare Stream-Metadaten aufzulösen. Du kannst einen eigenen, vertrauenswürdigen Endpunkt angeben; bleibt das Feld leer, fällt Ech0 auf einen Standard-Resolver zurück. Für den produktiven Einsatz empfiehlt sich ein selbstgehosteter Endpunkt.
@@ -249,7 +249,7 @@ Für den schnellsten Einstieg reicht der oben gezeigte [In 60 Sekunden ausprobie
 
 **Entwicklung**
 
-Das lokale Setup, Umgebungsanforderungen und das Front-/Backend-Zusammenspiel sind in **[docs/dev/development.md](./docs/dev/development.md)** dokumentiert. Architektur und Konventionen findest du in [`CLAUDE.md`](./CLAUDE.md) und [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+Das lokale Setup, Umgebungsanforderungen und das Front-/Backend-Zusammenspiel sind in **[docs/dev/development.md](./docs/dev/development.md)** dokumentiert. Architektur und Konventionen findest du in [`CLAUDE.md`](./CLAUDE.md) und [`CONTRIBUTING.md`](./CONTRIBUTING.md). Ein interaktives Architekturdiagramm gibt es unter **[ech0.app/arch](https://www.ech0.app/arch)**.
 
 ---
 

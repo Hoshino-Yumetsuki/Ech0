@@ -37,7 +37,7 @@ func (boomStore) Set(context.Context, string, string) error   { return nil }
 func (boomStore) Delete(context.Context, string) error        { return nil }
 
 func TestGet_MissReturnsNormalizedDefault(t *testing.T) {
-	got, err := Get(context.Background(), kvstore.NewMemory(), demoSpec)
+	got, err := demoSpec.Get(context.Background(), kvstore.NewMemory())
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestGet_MissReturnsNormalizedDefault(t *testing.T) {
 func TestGet_ReadsStoredValue(t *testing.T) {
 	kv := kvstore.NewMemory()
 	_ = kv.Set(context.Background(), demoSpec.Key, `{"name":"stored","tag":"x"}`)
-	got, err := Get(context.Background(), kv, demoSpec)
+	got, err := demoSpec.Get(context.Background(), kv)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestGet_ReadsStoredValue(t *testing.T) {
 func TestGet_AppliesNormalizeToStoredValue(t *testing.T) {
 	kv := kvstore.NewMemory()
 	_ = kv.Set(context.Background(), demoSpec.Key, `{"name":"stored"}`)
-	got, err := Get(context.Background(), kv, demoSpec)
+	got, err := demoSpec.Get(context.Background(), kv)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestGet_AppliesNormalizeToStoredValue(t *testing.T) {
 }
 
 func TestGet_BackendErrorReturnsDefaultAndError(t *testing.T) {
-	got, err := Get(context.Background(), boomStore{}, demoSpec)
+	got, err := demoSpec.Get(context.Background(), boomStore{})
 	if err == nil {
 		t.Fatal("want backend error to propagate")
 	}
@@ -83,7 +83,7 @@ func TestGet_BackendErrorReturnsDefaultAndError(t *testing.T) {
 func TestGet_UnparseableValueReturnsDefaultAndError(t *testing.T) {
 	kv := kvstore.NewMemory()
 	_ = kv.Set(context.Background(), demoSpec.Key, `{not valid json`)
-	got, err := Get(context.Background(), kv, demoSpec)
+	got, err := demoSpec.Get(context.Background(), kv)
 	if err == nil {
 		t.Fatal("want unmarshal error to propagate")
 	}
@@ -94,10 +94,10 @@ func TestGet_UnparseableValueReturnsDefaultAndError(t *testing.T) {
 
 func TestSet_RoundTrip(t *testing.T) {
 	kv := kvstore.NewMemory()
-	if err := Set(context.Background(), kv, demoSpec, demo{Name: "x", Tag: "y"}); err != nil {
+	if err := demoSpec.Set(context.Background(), kv, demo{Name: "x", Tag: "y"}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	got, err := Get(context.Background(), kv, demoSpec)
+	got, err := demoSpec.Get(context.Background(), kv)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestSet_RoundTrip(t *testing.T) {
 
 func TestSet_AppliesNormalizeOnWrite(t *testing.T) {
 	kv := kvstore.NewMemory()
-	if err := Set(context.Background(), kv, demoSpec, demo{Name: "x"}); err != nil {
+	if err := demoSpec.Set(context.Background(), kv, demo{Name: "x"}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	raw, err := kv.Get(context.Background(), demoSpec.Key)
@@ -148,7 +148,7 @@ func TestSeed_IdempotentDoesNotOverwrite(t *testing.T) {
 	if err := Seed(context.Background(), kv); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	got, err := Get(context.Background(), kv, System)
+	got, err := System.Get(context.Background(), kv)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestSeed_CommentDefaultsSMTPPort(t *testing.T) {
 	if err := Seed(context.Background(), kv); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	got, err := Get(context.Background(), kv, Comment)
+	got, err := Comment.Get(context.Background(), kv)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestSeed_PasskeyMigratesFromLegacyOAuth2(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	got, err := Get(context.Background(), kv, Passkey)
+	got, err := Passkey.Get(context.Background(), kv)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}

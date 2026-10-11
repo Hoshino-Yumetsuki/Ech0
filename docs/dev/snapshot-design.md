@@ -30,7 +30,7 @@
 
 | 出口 | 路径 / 入口 | 机制 |
 |------|------------|------|
-| 手动快照 | `POST /migration/export`、`GET /migration/export/status`、`POST /migration/export/cancel` | `job.Manager`（`TypeExport`，持久化 / 可取消 / 状态轮询）→ `ExportEngine` |
+| 手动快照 | `POST /migration/export`、`GET /migration/export/status`、`POST /migration/export/cancel` | `job.Manager`（`jobModel.Export`，持久化 / 可取消 / 状态轮询）→ `ExportEngine` |
 | 定时快照 | `internal/task/scheduled`（cron） | 直接同步调 `ExportEngine`（不走 job，避免与手动导出抢占单行） |
 | 下载 | `GET /migration/export/download` | 同步取回「最新已产出的快照」（`snapshot.LatestPath`）并流式下发，不再现打包 |
 

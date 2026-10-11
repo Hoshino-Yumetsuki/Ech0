@@ -183,7 +183,7 @@ func newRoundTripService(t *testing.T, echoSvc EchoService, baseURL string) *Cop
 	})
 	return &CopilotService{
 		durableKV:   kv,
-		userReader:  &stubUserReader{user: userModel.User{ID: "u1", Username: "alice"}},
+		userReader:  &stubUserReader{user: userModel.User{ID: "u1", Username: "alice", IsAdmin: true}},
 		echoService: echoSvc,
 		embedding:   &stubEmbeddingSvc{},
 		asks:        newAskRegistry(),

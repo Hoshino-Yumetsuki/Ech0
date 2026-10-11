@@ -85,7 +85,7 @@ func (s *Snapshot) reload(ctx context.Context) error {
 		return nil
 	}
 
-	schedule, err := coreSetting.Get(ctx, s.durableKV, coreSetting.Snapshot)
+	schedule, err := coreSetting.Snapshot.Get(ctx, s.durableKV)
 	if err != nil {
 		logUtil.GetLogger().Error("Failed to read snapshot schedule, keeping current jobs",
 			slog.String("module", logModule), logUtil.Err(err))

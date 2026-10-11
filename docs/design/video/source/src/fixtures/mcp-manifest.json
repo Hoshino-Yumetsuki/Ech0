@@ -1,0 +1,397 @@
+{
+  "path": "/mcp",
+  "transport": "streamable-http",
+  "audience": "mcp-remote",
+  "protocol_versions": [
+    "2026-07-28",
+    "2025-11-25",
+    "2025-06-18",
+    "2025-03-26"
+  ],
+  "tools": [
+    {
+      "name": "search_posts",
+      "title": "Search Posts",
+      "description": "Search posts by keyword and/or tag IDs. Returns paginated results: {items, total, page, page_size}. All parameters are optional; omitting everything returns the latest posts.",
+      "scopes": [
+        "echo:read"
+      ],
+      "read_only": true,
+      "destructive": false
+    },
+    {
+      "name": "get_post",
+      "title": "Get Post",
+      "description": "Retrieve a single post by UUID. Returns the full post object including content, tags, like count, and timestamps.",
+      "scopes": [
+        "echo:read"
+      ],
+      "read_only": true,
+      "destructive": false
+    },
+    {
+      "name": "list_tags",
+      "title": "List Tags",
+      "description": "List every tag in the system. Each entry contains the tag id, name, and usage count. No parameters needed.",
+      "scopes": [
+        "echo:read"
+      ],
+      "read_only": true,
+      "destructive": false
+    },
+    {
+      "name": "create_post",
+      "title": "Create Post",
+      "description": "Create a new post. At least one of content, echo_files, or extension must be provided. Returns {id, message}. To attach files, upload them first via the REST API (POST \u003cbase_url\u003e/api/files/upload, multipart/form-data, field 'file') and pass the returned id values in echo_files. Read the resource ech0://guide/file-upload for full upload instructions.",
+      "scopes": [
+        "echo:write"
+      ],
+      "read_only": false,
+      "destructive": false
+    },
+    {
+      "name": "update_post",
+      "title": "Update Post",
+      "description": "Update an existing post. Only supplied fields are changed, except echo_files and extension which fully replace the existing values when provided. Returns {id, message}.",
+      "scopes": [
+        "echo:write"
+      ],
+      "read_only": false,
+      "destructive": true
+    },
+    {
+      "name": "delete_post",
+      "title": "Delete Post",
+      "description": "Permanently delete a post. Returns {id, message}. This action cannot be undone.",
+      "scopes": [
+        "echo:write"
+      ],
+      "read_only": false,
+      "destructive": true
+    },
+    {
+      "name": "get_today_posts",
+      "title": "Get Today's Posts",
+      "description": "Return all posts created today. The boundary of 'today' depends on the timezone parameter. Returns an array of post objects.",
+      "scopes": [
+        "echo:read"
+      ],
+      "read_only": true,
+      "destructive": false
+    },
+    {
+      "name": "like_post",
+      "title": "Like Post",
+      "description": "Increment the like (favourite) count of a post by one. Returns {id, message}.",
+      "scopes": [
+        "echo:write"
+      ],
+      "read_only": false,
+      "destructive": false
+    },
+    {
+      "name": "delete_tag",
+      "title": "Delete Tag",
+      "description": "Delete a tag and remove its association from all posts. Returns {id, message}. This action cannot be undone.",
+      "scopes": [
+        "echo:write"
+      ],
+      "read_only": false,
+      "destructive": true
+    },
+    {
+      "name": "get_hot_posts",
+      "title": "Get Hot Posts",
+      "description": "Return the most popular posts, ranked by a weighted score of likes and comment count. Returns an array of post objects.",
+      "scopes": [
+        "echo:read"
+      ],
+      "read_only": true,
+      "destructive": false
+    },
+    {
+      "name": "get_random_post",
+      "title": "Get Random Post",
+      "description": "Return a single randomly selected post. Returns the post object, or null if there are no posts. No parameters needed.",
+      "scopes": [
+        "echo:read"
+      ],
+      "read_only": true,
+      "destructive": false
+    },
+    {
+      "name": "get_on_this_day_posts",
+      "title": "Get On This Day Posts",
+      "description": "Return posts from past years that share the same month and day as today ('on this day' / this day in history). The day boundary depends on the timezone parameter. Returns an array of post objects.",
+      "scopes": [
+        "echo:read"
+      ],
+      "read_only": true,
+      "destructive": false
+    },
+    {
+      "name": "list_comments",
+      "title": "List Comments",
+      "description": "List approved public comments for a post (equivalent to GET /api/comments with echo_id). Returns comment objects including nickname, content, created_at, and status when applicable.",
+      "scopes": [
+        "comment:read"
+      ],
+      "read_only": true,
+      "destructive": false
+    },
+    {
+      "name": "create_integration_comment",
+      "title": "Create Integration Comment",
+      "description": "Create a trusted integration/AI comment using the same backend as POST /api/comments/integration: no captcha or form_token; source is marked integration; subject to integration rate limits and duplicate checks. Requires comment:write. See resource ech0://guide/integration-comment for the REST equivalent (curl) and audience rules.",
+      "scopes": [
+        "comment:write"
+      ],
+      "read_only": false,
+      "destructive": false
+    },
+    {
+      "name": "create_comment",
+      "title": "Create Comment (Integration)",
+      "description": "Alias of create_integration_comment. Prefer this name in agent workflows; behavior and requirements are identical.",
+      "scopes": [
+        "comment:write"
+      ],
+      "read_only": false,
+      "destructive": false
+    },
+    {
+      "name": "list_files",
+      "title": "List Files",
+      "description": "List uploaded file metadata with optional search and storage type filter. Returns paginated results: {items, total, page, page_size}. Each item's id can be used as echo_files[].file_id in create_post/update_post. Does not return file contents.",
+      "scopes": [
+        "file:read"
+      ],
+      "read_only": true,
+      "destructive": false
+    },
+    {
+      "name": "get_file",
+      "title": "Get File",
+      "description": "Get metadata for a single file (name, size, mime type, storage type, URL, timestamps). The id can be used as echo_files[].file_id in create_post/update_post. Does not return file contents.",
+      "scopes": [
+        "file:read"
+      ],
+      "read_only": true,
+      "destructive": false
+    },
+    {
+      "name": "delete_file",
+      "title": "Delete File",
+      "description": "Permanently delete a file from storage. Returns {id, message}. This action cannot be undone.",
+      "scopes": [
+        "file:write"
+      ],
+      "read_only": false,
+      "destructive": true
+    },
+    {
+      "name": "create_external_file",
+      "title": "Create External File",
+      "description": "Register an external URL as an Ech0 file record (no upload needed). Returns the created file metadata including id, which can be used as echo_files[].file_id in create_post/update_post.",
+      "scopes": [
+        "file:write"
+      ],
+      "read_only": false,
+      "destructive": false
+    },
+    {
+      "name": "list_connects",
+      "title": "List Connects",
+      "description": "List all saved peer connections (id and URL). These are the remote Ech0 instances the current instance is tracking.",
+      "scopes": [
+        "connect:read"
+      ],
+      "read_only": true,
+      "destructive": false
+    },
+    {
+      "name": "get_connects_info",
+      "title": "Get Connects Info",
+      "description": "Fetch aggregated public info (name, URL, logo, post stats, version) for every saved peer. Data is cached for 30 minutes; the first call after expiry may take a few seconds as the server fans out HTTP requests to each peer.",
+      "scopes": [
+        "connect:read"
+      ],
+      "read_only": true,
+      "destructive": false
+    },
+    {
+      "name": "add_connect",
+      "title": "Add Connect",
+      "description": "Add a remote Ech0 instance as a peer connection. The connect_url must point to the /connect endpoint of the remote instance (e.g. https://example.com/api/connect). Returns {id, message}.",
+      "scopes": [
+        "connect:write"
+      ],
+      "read_only": false,
+      "destructive": false
+    },
+    {
+      "name": "delete_connect",
+      "title": "Delete Connect",
+      "description": "Remove a saved peer connection by ID. Returns {id, message}. This action cannot be undone.",
+      "scopes": [
+        "connect:write"
+      ],
+      "read_only": false,
+      "destructive": true
+    },
+    {
+      "name": "get_recent",
+      "title": "Get Recent Summary",
+      "description": "Return an AI-generated natural-language summary of the site owner's recent activity. The result is cached and may take a few seconds on first call if the cache has expired.",
+      "scopes": [
+        "echo:read"
+      ],
+      "read_only": true,
+      "destructive": false
+    },
+    {
+      "name": "list_webhooks",
+      "title": "List Webhooks",
+      "description": "List all configured webhooks. Returns an array of webhook objects (id, name, url, is_active, last_status, last_trigger, timestamps). Secrets are never exposed.",
+      "scopes": [
+        "admin:settings"
+      ],
+      "read_only": true,
+      "destructive": false
+    },
+    {
+      "name": "create_webhook",
+      "title": "Create Webhook",
+      "description": "Create a new webhook endpoint. Returns {message} on success.",
+      "scopes": [
+        "admin:settings"
+      ],
+      "read_only": false,
+      "destructive": false
+    },
+    {
+      "name": "update_webhook",
+      "title": "Update Webhook",
+      "description": "Update an existing webhook by ID. All fields in the body replace the current values. Returns {id, message}.",
+      "scopes": [
+        "admin:settings"
+      ],
+      "read_only": false,
+      "destructive": true
+    },
+    {
+      "name": "delete_webhook",
+      "title": "Delete Webhook",
+      "description": "Delete a webhook by ID. Returns {id, message}. This action cannot be undone.",
+      "scopes": [
+        "admin:settings"
+      ],
+      "read_only": false,
+      "destructive": true
+    },
+    {
+      "name": "test_webhook",
+      "title": "Test Webhook",
+      "description": "Send a test POST request to the webhook endpoint. Returns {id, message} indicating whether the test was dispatched.",
+      "scopes": [
+        "admin:settings"
+      ],
+      "read_only": false,
+      "destructive": false
+    }
+  ],
+  "resources": [
+    {
+      "uri": "ech0://tags",
+      "name": "tags",
+      "title": "All Tags",
+      "description": "JSON array of all tags. Each object has id, name, and the number of posts using this tag.",
+      "scopes": [
+        "echo:read"
+      ]
+    },
+    {
+      "uri": "ech0://posts/recent",
+      "name": "recent_posts",
+      "title": "Recent Posts",
+      "description": "The 20 most recently created posts (newest first). Append ?limit=N (1–100) to the URI to change the count.",
+      "scopes": [
+        "echo:read"
+      ]
+    },
+    {
+      "uri": "ech0://profile/me",
+      "name": "profile",
+      "title": "Current User Profile",
+      "description": "JSON object with id, username, email, avatar URL, and admin flag of the token owner.",
+      "scopes": [
+        "profile:read"
+      ]
+    },
+    {
+      "uri": "ech0://comments/recent",
+      "name": "recent_comments",
+      "title": "Recent Comments",
+      "description": "The 20 most recent approved public comments across all posts, newest first.",
+      "scopes": [
+        "comment:read"
+      ]
+    },
+    {
+      "uri": "ech0://guide/integration-comment",
+      "name": "integration_comment_guide",
+      "title": "Integration Comment Guide",
+      "description": "REST and MCP usage for posting integration/AI comments without captcha (same as POST /api/comments/integration).",
+      "scopes": [
+        "comment:read"
+      ]
+    },
+    {
+      "uri": "ech0://guide/file-upload",
+      "name": "file_upload_guide",
+      "title": "File Upload Guide",
+      "description": "Step-by-step instructions for uploading files via the REST API so they can be referenced in create_post/update_post echo_files.",
+      "scopes": [
+        "file:read"
+      ]
+    },
+    {
+      "uri": "ech0://stats/heatmap",
+      "name": "heatmap",
+      "title": "Post Heatmap",
+      "description": "Daily post counts for the past 30 calendar days (UTC day boundaries). Returns an array of {date, count} objects, suitable for calendar heatmap rendering.",
+      "scopes": [
+        "echo:read"
+      ]
+    },
+    {
+      "uri": "ech0://connect/self",
+      "name": "connect_self",
+      "title": "Current Instance Info",
+      "description": "Public card of this Ech0 instance: server name, URL, logo, today/total post counts, owner username, and version.",
+      "scopes": [
+        "connect:read"
+      ]
+    },
+    {
+      "uri": "ech0://stats/visitors",
+      "name": "visitor_stats",
+      "title": "Visitor Stats",
+      "description": "Daily visitor statistics (page views and unique visitors) for the past 7 days (UTC day boundaries). Returns an array of {date, pv, uv} objects. Requires admin scope.",
+      "scopes": [
+        "admin:settings"
+      ]
+    }
+  ],
+  "resource_templates": [
+    {
+      "uri_template": "ech0://posts/{id}",
+      "name": "post",
+      "title": "Post by ID",
+      "description": "Full post object (content, tags, timestamps, like count) for a given UUID. Replace {id} with the post UUID.",
+      "scopes": [
+        "echo:read"
+      ]
+    }
+  ]
+}

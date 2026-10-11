@@ -21,11 +21,23 @@ const (
 	respEventReasoningSummaryDelta = "response.reasoning_summary_text.delta"
 	respEventOutputItemDone        = "response.output_item.done"
 	respEventCompleted             = "response.completed"
+	respEventIncomplete            = "response.incomplete"
 	respEventFailed                = "response.failed"
 	respEventError                 = "error"
 )
 
-const respItemTypeFunctionCall = "function_call"
+const (
+	respItemTypeFunctionCall = "function_call"
+	respItemTypeReasoning    = "reasoning"
+)
+
+// respTurn carries a reasoning model's reasoning items into the next request.
+// With store=false the server keeps nothing between calls, so the only way the
+// model sees its own reasoning when a tool result comes back is the encrypted
+// copy it handed out — OpenAI's documented pattern for stateless tool loops.
+type respTurn struct {
+	reasoning []responses.ResponseReasoningItemParam
+}
 
 type openaiResponsesProvider struct {
 	setting model.AgentSetting
@@ -54,11 +66,16 @@ func (p *openaiResponsesProvider) buildParams(req Request) (responses.ResponseNe
 		Tools: tools,
 		Store: param.NewOpt(false),
 	}
-	if req.Temperature != nil {
-		params.Temperature = param.NewOpt(float64(*req.Temperature))
+	if len(tools) > 0 && req.ToolChoice == ToolChoiceNone {
+		params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
+			OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsNone),
+		}
 	}
-	if req.MaxTokens > 0 {
-		params.MaxOutputTokens = param.NewOpt(int64(req.MaxTokens))
+	if isOpenAIReasoningModel(p.setting.Model) {
+		params.Include = []responses.ResponseIncludable{responses.ResponseIncludableReasoningEncryptedContent}
+	}
+	if t := p.setting.Temperature; t != nil {
+		params.Temperature = param.NewOpt(*t)
 	}
 	return params, nil
 }
@@ -70,6 +87,11 @@ func (p *openaiResponsesProvider) buildInput(in []Message) responses.ResponseInp
 		case RoleSystem:
 			items = append(items, responses.ResponseInputItemParamOfMessage(m.Content, responses.EasyInputMessageRoleSystem))
 		case RoleAssistant:
+			if turn, ok := m.Native.(respTurn); ok {
+				for i := range turn.reasoning {
+					items = append(items, responses.ResponseInputItemUnionParam{OfReasoning: &turn.reasoning[i]})
+				}
+			}
 			if m.Content != "" {
 				items = append(
 					items,
@@ -83,7 +105,9 @@ func (p *openaiResponsesProvider) buildInput(in []Message) responses.ResponseInp
 				)
 			}
 		case RoleTool:
-			items = append(items, responses.ResponseInputItemParamOfFunctionCallOutput(m.ToolCallID, m.Content))
+			out := responses.ResponseInputItemParamOfFunctionCallOutput(m.Content)
+			out.OfFunctionCallOutput.CallID = param.NewOpt(m.ToolCallID)
+			items = append(items, out)
 		default:
 			if len(m.Images) > 0 {
 				items = append(items, responses.ResponseInputItemParamOfMessage(
@@ -176,6 +200,11 @@ func (p *openaiResponsesProvider) stream(ctx context.Context, req Request, ch ch
 
 	pipe := &textPipeline{}
 	calls := &respToolCalls{}
+	var (
+		turn      any
+		usage     Usage
+		truncated bool
+	)
 
 	for stream.Next() {
 		ev := stream.Current()
@@ -192,6 +221,15 @@ func (p *openaiResponsesProvider) stream(ctx context.Context, req Request, ch ch
 			calls.addItem(ev.Item)
 		case respEventCompleted:
 			calls.addFinal(ev.Response.Output)
+			turn = respReasoningOf(ev.Response.Output)
+			usage = respUsage(ev.Response.Usage)
+		case respEventIncomplete:
+			if ev.Response.IncompleteDetails.Reason == respIncompleteContentFilter {
+				send(ctx, ch, Event{Kind: EventError, Err: errContentFiltered})
+				return
+			}
+			truncated = true
+			usage = respUsage(ev.Response.Usage)
 		case respEventFailed:
 			send(ctx, ch, Event{Kind: EventError, Err: fmt.Errorf(
 				"openai responses: %s", respFailureMessage(ev.Response.Error),
@@ -217,7 +255,43 @@ func (p *openaiResponsesProvider) stream(ctx context.Context, req Request, ch ch
 			return
 		}
 	}
-	send(ctx, ch, Event{Kind: EventDone})
+	send(ctx, ch, Event{Kind: EventDone, Native: turn, Truncated: truncated, Usage: usage})
+}
+
+// respIncompleteContentFilter is the incomplete_details.reason for a response
+// the content filter stopped; the other reason, max_output_tokens, is a plain
+// truncation.
+const respIncompleteContentFilter = "content_filter"
+
+// respUsage reads Responses usage, where input_tokens already includes the
+// cached part.
+func respUsage(u responses.ResponseUsage) Usage {
+	return Usage{
+		InputTokens:  int(u.InputTokens),
+		CachedTokens: int(u.InputTokensDetails.CachedTokens),
+		OutputTokens: int(u.OutputTokens),
+	}
+}
+
+// respReasoningOf keeps the reasoning items that can be replayed. One without
+// encrypted content is only a reference to server-side state that store=false
+// never created, and sending it back fails the request.
+func respReasoningOf(output []responses.ResponseOutputItemUnion) any {
+	var items []responses.ResponseReasoningItemParam
+	for _, item := range output {
+		if item.Type != respItemTypeReasoning {
+			continue
+		}
+		r := item.AsReasoning()
+		if r.EncryptedContent == "" {
+			continue
+		}
+		items = append(items, r.ToParam())
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	return respTurn{reasoning: items}
 }
 
 type respToolCalls struct {

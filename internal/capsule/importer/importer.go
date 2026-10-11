@@ -453,7 +453,7 @@ func (s *session) resolveCommentHosts() (map[string]struct{}, error) {
 
 func (s *session) applySite(ctx context.Context) error {
 	site := s.loaded.Manifest.Site
-	current, err := coreSetting.Get(ctx, s.kv, coreSetting.System)
+	current, err := coreSetting.System.Get(ctx, s.kv)
 	if err != nil {
 		return fmt.Errorf("capsule import: read system setting: %w", err)
 	}
@@ -476,8 +476,7 @@ func (s *session) applySite(ctx context.Context) error {
 		{"custom_css", &current.CustomCSS, site.CustomCSS},
 		{"custom_js", &current.CustomJS, site.CustomJS},
 	}
-	pristine := coreSetting.System.Default()
-	coreSetting.System.Normalize(&pristine)
+	pristine := coreSetting.System.Pristine()
 	defaults := map[string]string{
 		"site_title":     pristine.SiteTitle,
 		"server_logo":    pristine.ServerLogo,
@@ -510,7 +509,7 @@ func (s *session) applySite(ctx context.Context) error {
 	if s.opts.DryRun {
 		return nil
 	}
-	if err := coreSetting.Set(ctx, s.kv, coreSetting.System, current); err != nil {
+	if err := coreSetting.System.Set(ctx, s.kv, current); err != nil {
 		return fmt.Errorf("capsule import: write system setting: %w", err)
 	}
 	return nil

@@ -15,7 +15,6 @@ import (
 
 	commonModel "github.com/lin-snow/ech0/internal/model/common"
 	uuidUtil "github.com/lin-snow/ech0/internal/util/uuid"
-	"github.com/lin-snow/ech0/pkg/viewer"
 )
 
 // AskOption is one reply a question offers.
@@ -300,6 +299,9 @@ func (s *CopilotService) AnswerAsk(ctx context.Context, askID string, answers []
 	if askID == "" || len(answers) == 0 {
 		return errors.New(commonModel.CHAT_ASK_NOT_PENDING)
 	}
-	userID := viewer.MustFromContext(ctx).UserID()
-	return s.asks.answer(askID, userID, answers)
+	user, err := s.requireAdmin(ctx)
+	if err != nil {
+		return err
+	}
+	return s.asks.answer(askID, user.ID, answers)
 }

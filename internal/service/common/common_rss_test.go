@@ -6,57 +6,19 @@ package service_test
 import (
 	"net/http"
 	"net/http/httptest"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lin-snow/ech0/internal/cache"
 	echoModel "github.com/lin-snow/ech0/internal/model/echo"
 	fileModel "github.com/lin-snow/ech0/internal/model/file"
 	commonService "github.com/lin-snow/ech0/internal/service/common"
+	"github.com/lin-snow/ech0/internal/test/helpers"
 	commonmock "github.com/lin-snow/ech0/internal/test/mocks/commonmock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
-
-type fakeCache struct {
-	mu   sync.Mutex
-	data map[string]any
-}
-
-var _ cache.ICache[string, any] = (*fakeCache)(nil)
-
-func newFakeCache() *fakeCache {
-	return &fakeCache{data: make(map[string]any)}
-}
-
-func (c *fakeCache) Set(key string, value any, _ int64) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.data[key] = value
-	return true
-}
-
-func (c *fakeCache) SetWithTTL(key string, value any, cost int64, _ time.Duration) bool {
-	return c.Set(key, value, cost)
-}
-
-func (c *fakeCache) Get(key string) (any, bool, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	v, ok := c.data[key]
-	return v, ok, nil
-}
-
-func (c *fakeCache) Delete(key string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.data, key)
-}
-
-func (c *fakeCache) Close() error { return nil }
 
 func newRSSContext(t *testing.T, host string) *gin.Context {
 	t.Helper()
@@ -71,7 +33,7 @@ func newRSSContext(t *testing.T, host string) *gin.Context {
 
 func TestGenerateRSS_NormalFeed(t *testing.T) {
 	repo := commonmock.NewMockCommonRepository(t)
-	svc := commonService.NewCommonService(repo, newFakeCache())
+	svc := commonService.NewCommonService(repo, helpers.NewTestCache())
 
 	echos := []echoModel.Echo{
 		{
@@ -98,7 +60,7 @@ func TestGenerateRSS_NormalFeed(t *testing.T) {
 
 func TestGenerateRSS_TagHTMLEntityEscaping(t *testing.T) {
 	repo := commonmock.NewMockCommonRepository(t)
-	svc := commonService.NewCommonService(repo, newFakeCache())
+	svc := commonService.NewCommonService(repo, helpers.NewTestCache())
 
 	echos := []echoModel.Echo{
 		{
@@ -126,7 +88,7 @@ func TestGenerateRSS_TagHTMLEntityEscaping(t *testing.T) {
 
 func TestGenerateRSS_RendersEchoImages(t *testing.T) {
 	repo := commonmock.NewMockCommonRepository(t)
-	svc := commonService.NewCommonService(repo, newFakeCache())
+	svc := commonService.NewCommonService(repo, helpers.NewTestCache())
 
 	echos := []echoModel.Echo{
 		{
@@ -153,7 +115,7 @@ func TestGenerateRSS_RendersEchoImages(t *testing.T) {
 
 func TestGenerateRSS_RendersMediaByCategory(t *testing.T) {
 	repo := commonmock.NewMockCommonRepository(t)
-	svc := commonService.NewCommonService(repo, newFakeCache())
+	svc := commonService.NewCommonService(repo, helpers.NewTestCache())
 
 	echos := []echoModel.Echo{
 		{
@@ -187,7 +149,7 @@ func TestGenerateRSS_RendersMediaByCategory(t *testing.T) {
 
 func TestGenerateRSS_MediaFieldEscaping(t *testing.T) {
 	repo := commonmock.NewMockCommonRepository(t)
-	svc := commonService.NewCommonService(repo, newFakeCache())
+	svc := commonService.NewCommonService(repo, helpers.NewTestCache())
 
 	echos := []echoModel.Echo{
 		{
@@ -218,7 +180,7 @@ func TestGenerateRSS_MediaFieldEscaping(t *testing.T) {
 
 func TestGenerateRSS_ReadThrough(t *testing.T) {
 	repo := commonmock.NewMockCommonRepository(t)
-	svc := commonService.NewCommonService(repo, newFakeCache())
+	svc := commonService.NewCommonService(repo, helpers.NewTestCache())
 
 	echos := []echoModel.Echo{{ID: "e1", Username: "u", Content: "c", CreatedAt: time.Now().UTC().Unix()}}
 
@@ -237,7 +199,7 @@ func TestGenerateRSS_ReadThrough(t *testing.T) {
 
 func TestGenerateRSS_RepositoryError(t *testing.T) {
 	repo := commonmock.NewMockCommonRepository(t)
-	svc := commonService.NewCommonService(repo, newFakeCache())
+	svc := commonService.NewCommonService(repo, helpers.NewTestCache())
 
 	repo.EXPECT().GetAllEchos(mock.Anything, false).Return(nil, assert.AnError).Once()
 

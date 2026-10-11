@@ -18,7 +18,7 @@ import (
 )
 
 func (settingService *SettingService) GetSetting(setting *model.SystemSetting) error {
-	v, err := coreSetting.Get(context.Background(), settingService.durableKV, coreSetting.System)
+	v, err := coreSetting.System.Get(context.Background(), settingService.durableKV)
 	if err != nil {
 		return err
 	}
@@ -40,7 +40,7 @@ func (settingService *SettingService) BootstrapDefaultLocale(
 	}
 
 	return settingService.transactor.Run(ctx, func(ctx context.Context) error {
-		current, err := coreSetting.Get(ctx, settingService.durableKV, coreSetting.System)
+		current, err := coreSetting.System.Get(ctx, settingService.durableKV)
 		if err != nil {
 			return err
 		}
@@ -48,7 +48,7 @@ func (settingService *SettingService) BootstrapDefaultLocale(
 			return nil
 		}
 		current.DefaultLocale = resolved
-		return coreSetting.Set(ctx, settingService.durableKV, coreSetting.System, current)
+		return coreSetting.System.Set(ctx, settingService.durableKV, current)
 	})
 }
 
@@ -88,7 +88,7 @@ func (settingService *SettingService) UpdateSetting(
 		setting.CustomCSS = newSetting.CustomCSS
 		setting.CustomJS = newSetting.CustomJS
 
-		if err := coreSetting.Set(ctx, settingService.durableKV, coreSetting.System, setting); err != nil {
+		if err := coreSetting.System.Set(ctx, settingService.durableKV, setting); err != nil {
 			return err
 		}
 

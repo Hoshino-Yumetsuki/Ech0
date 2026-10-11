@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	commonModel "github.com/lin-snow/ech0/internal/model/common"
 	echoModel "github.com/lin-snow/ech0/internal/model/echo"
 	embeddingModel "github.com/lin-snow/ech0/internal/model/embedding"
+	logUtil "github.com/lin-snow/ech0/pkg/log"
 )
 
 const defaultTopK = 6
@@ -47,6 +49,7 @@ type searchArgs struct {
 }
 
 func (s *CopilotService) searchEchosTool(allTags []echoModel.Tag, multimodal bool, locale string, loc *time.Location, window int, user chatUser) agent.Tool {
+	images := newImageBudget()
 	return agent.Tool{
 		Def: agent.ToolDef{
 			Name:        "search_echos",
@@ -58,7 +61,10 @@ func (s *CopilotService) searchEchosTool(allTags []echoModel.Tag, multimodal boo
 			var a searchArgs
 			_ = json.Unmarshal(args, &a)
 			a.Query = strings.TrimSpace(a.Query)
-			tagIDs := resolveTagIDs(allTags, a.Tags)
+			tagIDs, err := resolveTagIDs(allTags, a.Tags, locale)
+			if err != nil {
+				return agent.ToolOutput{}, err
+			}
 			from := parseDay(a.DateFrom, false, loc)
 			to := parseDay(a.DateTo, true, loc)
 			topK := effectiveTopK(window, a.Limit)
@@ -71,18 +77,15 @@ func (s *CopilotService) searchEchosTool(allTags []echoModel.Tag, multimodal boo
 			var results []embeddingModel.SearchResult
 			var total int64
 			var execErr error
-			switch {
-			case structured:
+			if structured {
 				results, total, execErr = s.queryEchos(ctx, user.ID, a.Query, tagIDs, from, to, topK)
-			case s.embedding.Enabled(ctx):
-				results, execErr = s.embedding.Search(ctx, a.Query, topK, user.Username)
-			default:
-				results, total, execErr = s.queryEchos(ctx, user.ID, a.Query, nil, 0, 0, topK)
+			} else {
+				results, total, execErr = s.searchByQuery(ctx, user.ID, a.Query, topK)
 			}
 			if execErr != nil {
 				return agent.ToolOutput{}, execErr
 			}
-			exts, images := s.enrichHits(ctx, results, multimodal)
+			exts, images := s.enrichHits(ctx, results, multimodal, images)
 			content := formatSearchResults(results, exts, loc)
 			if total > int64(len(results)) {
 				content = searchCoverageNoteFor(locale, int(total), len(results)) + "\n" + content
@@ -94,6 +97,55 @@ func (s *CopilotService) searchEchosTool(allTags []echoModel.Tag, multimodal boo
 			}, nil
 		},
 	}
+}
+
+// searchByQuery answers a free-text query: semantically when an index is
+// there, by keyword otherwise, and by both when the index comes up short.
+//
+// The semantic index is an accelerator, not the source of truth. It can be
+// switched on but never built, mid-rebuild, or built for another model, and
+// then an error or an empty hit list says nothing about whether the Echos
+// exist — answering "no such record" from it is wrong when a LIKE query would
+// find them. So any shortfall is topped up from keyword search, deduplicated,
+// with the semantic hits kept first.
+func (s *CopilotService) searchByQuery(ctx context.Context, userID, query string, topK int) ([]embeddingModel.SearchResult, int64, error) {
+	var semantic []embeddingModel.SearchResult
+	if s.embedding.Enabled(ctx) {
+		hits, err := s.embedding.Search(ctx, query, topK, userID)
+		if err != nil {
+			logUtil.GetLogger().Warn("semantic search failed, falling back to keyword search",
+				slog.String("module", "copilot"), logUtil.Err(err))
+		}
+		semantic = hits
+	}
+	if len(semantic) >= topK {
+		return semantic, 0, nil
+	}
+
+	keyword, total, err := s.queryEchos(ctx, userID, query, nil, 0, 0, topK)
+	if err != nil {
+		if len(semantic) > 0 {
+			return semantic, 0, nil
+		}
+		return nil, 0, err
+	}
+	if len(semantic) == 0 {
+		return keyword, total, nil
+	}
+	merged := semantic
+	have := make(map[string]bool, len(semantic))
+	for _, r := range semantic {
+		have[r.EchoID] = true
+	}
+	for _, r := range keyword {
+		if len(merged) >= topK {
+			break
+		}
+		if !have[r.EchoID] {
+			merged = append(merged, r)
+		}
+	}
+	return merged, 0, nil
 }
 
 func (s *CopilotService) queryEchos(ctx context.Context, userID, search string, tagIDs []string, from, to int64, limit int) ([]embeddingModel.SearchResult, int64, error) {
@@ -129,21 +181,38 @@ func echoToSearchResult(e echoModel.Echo) embeddingModel.SearchResult {
 	}
 }
 
-func resolveTagIDs(allTags []echoModel.Tag, names []string) []string {
+// resolveTagIDs maps tag names to IDs, and refuses rather than guesses when a
+// name matches nothing.
+//
+// Dropping an unknown name would quietly widen the query: tags=["阅读"] against
+// a site that calls it "读书" becomes a search over everything, and the model
+// reports the count for all Echos as the count for #阅读. An error goes back to
+// the model instead, which can pick an existing tag or search without one.
+func resolveTagIDs(allTags []echoModel.Tag, names []string, locale string) ([]string, error) {
 	if len(names) == 0 {
-		return nil
+		return nil, nil
 	}
 	byName := make(map[string]string, len(allTags))
 	for _, t := range allTags {
-		byName[strings.ToLower(t.Name)] = t.ID
+		byName[strings.ToLower(strings.TrimSpace(t.Name))] = t.ID
 	}
 	ids := make([]string, 0, len(names))
+	var unknown []string
 	for _, n := range names {
-		if id, ok := byName[strings.ToLower(strings.TrimSpace(n))]; ok {
+		n = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(n), "#"))
+		if n == "" {
+			continue
+		}
+		if id, ok := byName[strings.ToLower(n)]; ok {
 			ids = append(ids, id)
+		} else {
+			unknown = append(unknown, n)
 		}
 	}
-	return ids
+	if len(unknown) > 0 {
+		return nil, errors.New(unknownTagsMessageFor(locale, unknown))
+	}
+	return ids, nil
 }
 
 func parseDay(s string, endOfDay bool, loc *time.Location) int64 {

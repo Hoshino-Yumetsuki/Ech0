@@ -11,8 +11,8 @@ import (
 	commonModel "github.com/lin-snow/ech0/internal/model/common"
 	model "github.com/lin-snow/ech0/internal/model/setting"
 	webhookModel "github.com/lin-snow/ech0/internal/model/webhook"
-	"github.com/lin-snow/ech0/internal/util/egress"
 	urlUtil "github.com/lin-snow/ech0/internal/util/url"
+	"github.com/lin-snow/ech0/pkg/egress"
 	"github.com/lin-snow/ech0/pkg/viewer"
 )
 

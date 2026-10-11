@@ -20,6 +20,7 @@
 | 文档 | 说明 |
 |------|------|
 | [dev/architecture-overview.md](dev/architecture-overview.md) | **架构全景图**：进程启动、分层后端、业务领域、事件子系统、基础设施与 `pkg/` 自研库的关系总览（新手入口） |
+| [ech0.app/arch](https://www.ech0.app/arch)（源文件 [site/public/arch/index.html](../site/public/arch/index.html)） | **交互式架构图**：进程全景 + `pkg/`（busen / virefs / gocap / log / viewer / leakcheck）与事件、webhook、kvstore、visitor、job / task、生命周期的内部结构；浏览器打开，可拖拽缩放、点角标导览 |
 | [dev/config-and-settings-architecture.md](dev/config-and-settings-architecture.md) | 配置与设置的依赖架构：config/`internal/setting`/kvstore/transaction 四层关系、两层配置、事务如何随 ctx 流动、「读直连写走域」规约 |
 | [dev/table-design-standard.md](dev/table-design-standard.md) | Panel 表格组件（含管理端列表）的布局与交互规范 |
 | [dev/i18n-contract.md](dev/i18n-contract.md) | 前后端国际化约定（locale、API 错误字段、key 命名） |

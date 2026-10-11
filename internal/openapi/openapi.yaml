@@ -67,6 +67,9 @@ components:
           type: string
         protocol:
           type: string
+        temperature:
+          format: double
+          type: number
       type: object
     AgentSettingDto:
       additionalProperties: true
@@ -88,6 +91,14 @@ components:
           type: string
         protocol:
           type: string
+        temperature:
+          description: 采样温度；留空则不发送，使用模型默认值。是否支持以模型官方文档为准
+          format: double
+          maximum: 2
+          minimum: 0
+          type:
+            - number
+            - "null"
       type: object
     AnswerAskInputBody:
       additionalProperties: true

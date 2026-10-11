@@ -4,14 +4,12 @@ This package is the **official** landing page and **documentation site** for [Ec
 
 ## What lives here
 
-
 | Path          | Purpose                                                                                             |
 | ------------- | --------------------------------------------------------------------------------------------------- |
 | `app/routes/` | Pages: home (`/`), docs catalog (`/docs`), doc article (`/docs/`*), privacy                         |
 | `app/docs/`   | Doc registry (`registry.ts`), Markdown rendering (`MarkdownDoc.tsx`), table of contents helpers     |
 | `docs/`       | Markdown sources (`**/*.md`), images under `docs/imgs/` (copied into `public/docs-assets` on build) |
 | `public/`     | Static assets (`logo.svg`, `screenshot.png`, `_redirects` for SPA fallback on static hosts)         |
-
 
 The doc catalog order and featured cards are controlled in `app/docs/registry.ts` (`DOC_ORDER`, optional `DOC_HERO_SLUGS`).
 
@@ -36,11 +34,9 @@ pnpm format       # or pnpm format:check
 
 ## Environment
 
-
 | Variable        | Purpose                                                                                                                         |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `VITE_SITE_URL` | Canonical site origin (no trailing slash) for OG URLs, JSON-LD, sitemap-related logic. Default in code: `https://www.ech0.app`. |
-
 
 When deploying to a custom domain, align `VITE_SITE_URL` and update `public/sitemap.xml` / `public/robots.txt` if needed.
 

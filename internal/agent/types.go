@@ -26,6 +26,20 @@ type Message struct {
 	ToolCalls  []ToolCall
 	ToolCallID string
 	Images     []ImagePart
+
+	// IsError marks a tool result as a failure, so providers that can say so on
+	// the wire (Anthropic's is_error) do, instead of the model having to infer
+	// it from the wording.
+	IsError bool
+
+	// Native is the provider's own record of an assistant turn, carried back
+	// verbatim on the next request of the same run. Some protocols refuse a
+	// continuation that drops part of what the model produced — DeepSeek's
+	// reasoning_content, Claude's signed thinking blocks, OpenAI's encrypted
+	// reasoning items — and none of that belongs in a portable Message. The loop
+	// never looks inside; a provider only reads back values of its own type, so
+	// a value from any other provider is ignored rather than misread.
+	Native any
 }
 
 type ImagePart struct {
@@ -113,11 +127,24 @@ type ToolOutput struct {
 	Images  []ImagePart
 }
 
+// ToolChoice is how the model may use the tools a request declares.
+type ToolChoice uint8
+
+const (
+	// ToolChoiceAuto lets the model decide. The zero value.
+	ToolChoiceAuto ToolChoice = iota
+	// ToolChoiceNone keeps the tools declared but forbids calling them. It is
+	// how a run asks for a final answer once the history already holds tool
+	// calls: dropping the declarations instead is rejected by Anthropic
+	// ("requests which include tool_use or tool_result blocks must define
+	// tools") and is off the documented path for the other protocols.
+	ToolChoiceNone
+)
+
 type Request struct {
-	Messages    []Message
-	Tools       []ToolDef
-	Temperature *float32
-	MaxTokens   int
+	Messages   []Message
+	Tools      []ToolDef
+	ToolChoice ToolChoice
 }
 
 type Response struct {
@@ -139,6 +166,31 @@ type Event struct {
 	Text     string
 	ToolCall ToolCall
 	Err      error
+	// Native rides on EventDone: the provider's own record of the turn, to be
+	// stored on the assistant Message the loop appends (see Message.Native).
+	Native any
+	// Truncated rides on EventDone: the output stopped at a length limit
+	// instead of finishing, so its text is partial and any tool call in it may
+	// be cut mid-argument.
+	Truncated bool
+	// Usage rides on EventDone: what the request cost, as the provider
+	// reported it. Zero when the provider reported nothing.
+	Usage Usage
+}
+
+// Usage is one request's token counts in the provider's own tokens.
+type Usage struct {
+	// InputTokens is everything the request carried, cached or not.
+	InputTokens int
+	// CachedTokens is the part of InputTokens read from the prompt cache.
+	CachedTokens int
+	OutputTokens int
+}
+
+func (u *Usage) add(o Usage) {
+	u.InputTokens += o.InputTokens
+	u.CachedTokens += o.CachedTokens
+	u.OutputTokens += o.OutputTokens
 }
 
 type RunStrings struct {
@@ -147,7 +199,11 @@ type RunStrings struct {
 	ToolError       string
 	ImageNote       string
 	ContextTrimNote string
+	TruncateNote    string
 	Malformed       string
+	// OutputTruncated closes an answer the model could not finish because it
+	// ran into its output limit.
+	OutputTruncated string
 }
 
 type RunRequest struct {
@@ -155,7 +211,6 @@ type RunRequest struct {
 	Messages         []Message
 	Tools            []Tool
 	MaxRounds        int
-	Temp             *float32
 	Strings          RunStrings
 	Timeout          time.Duration
 	MaxContextTokens int

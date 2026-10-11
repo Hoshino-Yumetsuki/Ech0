@@ -9,7 +9,7 @@ import (
 
 	"github.com/lin-snow/ech0/internal/event"
 	webhookModel "github.com/lin-snow/ech0/internal/model/webhook"
-	"github.com/lin-snow/ech0/internal/util/egress"
+	"github.com/lin-snow/ech0/pkg/egress"
 )
 
 const (

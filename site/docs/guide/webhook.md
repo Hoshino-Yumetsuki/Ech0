@@ -61,8 +61,8 @@ description: Webhook 是什么、如何配置、请求格式、验签与重试�
 | `echo.created` / `echo.updated` / `echo.deleted`                 | 动态（Echo）发布、编辑、删除       |
 | `comment.created` / `comment.status.updated` / `comment.deleted` | 评论创建、状态变更（如审核）、删除 |
 | `resource.uploaded`                                              | 资源/文件上传完成                  |
-| `system.snapshot` / `system.export`                                | 快照或导出任务相关                 |
-| `system.snapshot_schedule.updated`                                 | 快照计划被修改                     |
+| `system.snapshot` / `system.export`                              | 快照或导出任务相关                 |
+| `system.snapshot_schedule.updated`                               | 快照计划被修改                     |
 
 说明：评论与审核相关行为也可结合 [评论系统](/docs/guide/comment) 理解；快照类与 [数据管理](/docs/guide/datacontrol) 中的计划任务相关。
 

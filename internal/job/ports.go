@@ -14,9 +14,8 @@ var ErrNotFound = errors.New("job not found")
 
 type ReportFunc func(phase string, snapshot any)
 
-type Runner interface {
-	Run(ctx context.Context, payload []byte, report ReportFunc) (result any, err error)
-}
+// RunFunc executes one job of a kind whose payload type is P.
+type RunFunc[P any] func(ctx context.Context, p P, report ReportFunc) (result any, err error)
 
 type JobRepository interface {
 	Upsert(ctx context.Context, j *jobModel.Job) error

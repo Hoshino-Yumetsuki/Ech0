@@ -160,12 +160,19 @@ const (
     StatusCancelled Status = "cancelled"
 )
 
-// Runner（边界：擦除/untyped）——每种作业只关心「怎么干活」。
-// payload 为原始 JSON；result 作为终态 Job.Payload 落库；返回 error 则置 failed。
+// Kind：作业类型名 + 编译期绑定的 payload 类型 P（幽灵类型参数，底层就是 string）。
+type Kind[P any] string
+
+const (
+    Reindex   Kind[struct{}]                       = "reindex"
+    Migration Kind[migratorModel.MigrationPayload] = "migration"
+    Export    Kind[migratorModel.ExportPayload]    = "export"
+)
+
+// RunFunc——每种作业只关心「怎么干活」，直接拿到 typed payload。
+// result 作为终态 Job.Payload 落库；返回 error 则置 failed。
 // 必须尊重 ctx 取消（Cancel 时 ctx.Done() 触发）。
-type Runner interface {
-    Run(ctx context.Context, payload []byte, report ReportFunc) (result any, err error)
-}
+type RunFunc[P any] func(ctx context.Context, p P, report ReportFunc) (result any, err error)
 
 // ReportFunc：Runner 上报进度（仅进内存，§8）。phase 必填，snapshot 可为 nil。
 type ReportFunc func(phase string, snapshot any)
@@ -179,46 +186,37 @@ type JobRepository interface {
 }
 
 type Service struct {
-    runners map[string]Runner
+    runners map[string]runner          // 擦除后的 RunFunc，payload 为落库的原始 JSON
     repo    JobRepository
     live    map[string]*Progress       // 按 type；仅当前在跑作业的实时进度，内存态
     cancels map[string]context.CancelFunc
     mu      sync.Mutex
 }
 
-func (s *Service) Register(jobType string, r Runner)                       // 启动期注册
-func (s *Service) Submit(jobType string, payload []byte) (Job, error)      // 互斥→upsert pending→go run
-func (s *Service) Get(jobType string) (Job, error)                         // durable ⊕ 内存进度
-func (s *Service) Cancel(jobType string) error
+// Go 1.27 泛型方法：P 由 Kind 推断，调用处不写类型实参。
+func (s *Service) Register[P any](k Kind[P], run RunFunc[P])               // 启动期注册
+func (s *Service) Submit[P any](ctx, k Kind[P], p P) (Job, error)          // 编码→互斥→upsert pending→go run
+func (s *Service) Get[P any](ctx, k Kind[P]) (Job, error)                  // durable ⊕ 内存进度
+func (s *Service) Cancel[P any](k Kind[P]) error
 ```
 
 > 接口是 **type-centric**（不是 id-centric）：因每 type 单行，访问路径就是 type；前端轮询直接打 `/reindex/status`，无需传 id。
 
-### 6.2 泛型边界 `Adapt[P]`（作者端 typed，注册表 untyped）
+### 6.2 泛型边界 `Kind[P]`（两端 typed，注册表内部擦除）
 
-异构注册表 `map[type]Runner` 装着不同 payload 类型的 Runner，Go 泛型无法让它们共存于一个 map——**边界必然擦除**。因此泛型只放作者端：
+异构注册表 `map[type]runner` 装着不同 payload 类型的作业，Go 泛型无法让它们共存于一个 map——**边界必然擦除**，但擦除只发生在 `Manager` 内部：`Register[P]` 把 `RunFunc[P]` 包成「解码 JSON → 调 run」的闭包，`Submit[P]` 在入口把 `p` 编码成 JSON。`Kind[P]` 把两端钉在同一个 `P` 上：
 
 ```go
-type TypedRun[P any] func(ctx context.Context, p P, report ReportFunc) (any, error)
+// 注册（runner.Run 直接拿 typed payload，零 map[string]any 脏活）：
+m.Register(jobModel.Reindex, reindexRunner.Run)       // RunFunc[struct{}]
+m.Register(jobModel.Migration, migrationRunner.Run)   // RunFunc[MigrationPayload]
 
-func Adapt[P any](fn TypedRun[P]) Runner {
-    return runnerFunc(func(ctx context.Context, raw []byte, report ReportFunc) (any, error) {
-        var p P
-        if len(raw) > 0 {
-            if err := json.Unmarshal(raw, &p); err != nil {
-                return nil, fmt.Errorf("decode %T payload: %w", p, err)
-            }
-        }
-        return fn(ctx, p, report)
-    })
-}
-
-// 注册（reindexRunner.Run 直接拿 ReindexPayload，零 map[string]any 脏活）：
-svc.Register("reindex",   job.Adapt(reindexRunner.Run))
-svc.Register("migration", job.Adapt(migrationRunner.Run))
+// 提交（调用方不再手写 json.Marshal）：
+m.Submit(ctx, jobModel.Migration, migratorModel.MigrationPayload{...})
+m.Submit(ctx, jobModel.Migration, migratorModel.ExportPayload{...}) // 编译错误：P 不匹配
 ```
 
-reindex 无输入 payload（`ReindexPayload struct{}`）；migration 的 `MigrationPayload{ SourceType string; SourcePayload map[string]any }` 照样能放下现有 map，不丢信息。
+reindex 无输入 payload（`Kind[struct{}]`，pending 行 payload 留空而非 `"{}"`）；migration 的 `MigrationPayload{ SourceType string; SourcePayload map[string]any }` 照样能放下现有 map，不丢信息。
 
 ## 7. 状态机与生命周期
 

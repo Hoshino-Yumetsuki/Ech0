@@ -27,7 +27,7 @@ type Manager struct {
 	repo JobRepository
 
 	mu      sync.Mutex
-	runners map[string]Runner
+	runners map[string]runner
 	live    map[string]*Progress
 	cancels map[string]context.CancelFunc
 }
@@ -35,23 +35,42 @@ type Manager struct {
 func NewManager(repo JobRepository) *Manager {
 	return &Manager{
 		repo:    repo,
-		runners: make(map[string]Runner),
+		runners: make(map[string]runner),
 		live:    make(map[string]*Progress),
 		cancels: make(map[string]context.CancelFunc),
 	}
 }
 
-func (m *Manager) Register(jobType string, r Runner) {
+// runner is a RunFunc with its payload type erased back to the persisted JSON.
+type runner func(ctx context.Context, payload string, report ReportFunc) (any, error)
+
+func (m *Manager) Register[P any](kind jobModel.Kind[P], run RunFunc[P]) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.runners[jobType] = r
+	m.runners[string(kind)] = func(ctx context.Context, payload string, report ReportFunc) (any, error) {
+		var p P
+		if payload != "" {
+			if err := json.Unmarshal([]byte(payload), &p); err != nil {
+				return nil, fmt.Errorf("decode %T payload: %w", p, err)
+			}
+		}
+		return run(ctx, p, report)
+	}
 }
 
-func (m *Manager) Submit(ctx context.Context, jobType string, payload []byte) (jobModel.Job, error) {
+func (m *Manager) Submit[P any](ctx context.Context, kind jobModel.Kind[P], p P) (jobModel.Job, error) {
+	payload, err := encodePayload(p)
+	if err != nil {
+		return jobModel.Job{}, err
+	}
+	return m.submit(ctx, string(kind), payload)
+}
+
+func (m *Manager) submit(ctx context.Context, jobType, payload string) (jobModel.Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	runner, ok := m.runners[jobType]
+	run, ok := m.runners[jobType]
 	if !ok {
 		return jobModel.Job{}, fmt.Errorf("%w: %s", ErrNoRunner, jobType)
 	}
@@ -68,7 +87,7 @@ func (m *Manager) Submit(ctx context.Context, jobType string, payload []byte) (j
 	pending := jobModel.Job{
 		Type:      jobType,
 		Status:    jobModel.StatusPending,
-		Payload:   string(payload),
+		Payload:   payload,
 		StartedAt: &now,
 	}
 	if err := m.repo.Upsert(ctx, &pending); err != nil {
@@ -79,13 +98,13 @@ func (m *Manager) Submit(ctx context.Context, jobType string, payload []byte) (j
 	m.cancels[jobType] = cancel
 	delete(m.live, jobType)
 
-	go m.run(runCtx, jobType, runner, pending)
+	go m.run(runCtx, jobType, run, pending)
 
 	logUtil.GetLogger().Info("job submitted", slog.String("module", logModule), slog.String("type", jobType))
 	return pending, nil
 }
 
-func (m *Manager) run(runCtx context.Context, jobType string, runner Runner, base jobModel.Job) {
+func (m *Manager) run(runCtx context.Context, jobType string, run runner, base jobModel.Job) {
 	dbCtx := context.Background()
 	report := func(phase string, snapshot any) { m.setLive(jobType, phase, snapshot) }
 
@@ -95,7 +114,7 @@ func (m *Manager) run(runCtx context.Context, jobType string, runner Runner, bas
 			slog.String("module", logModule), slog.String("type", jobType), logUtil.Err(err))
 	}
 
-	result, runErr := runner.Run(runCtx, []byte(base.Payload), report)
+	result, runErr := run(runCtx, base.Payload, report)
 
 	now := time.Now().UTC().Unix()
 	base.FinishedAt = &now
@@ -129,7 +148,8 @@ func (m *Manager) run(runCtx context.Context, jobType string, runner Runner, bas
 	m.clear(jobType)
 }
 
-func (m *Manager) Get(ctx context.Context, jobType string) (jobModel.Job, error) {
+func (m *Manager) Get[P any](ctx context.Context, kind jobModel.Kind[P]) (jobModel.Job, error) {
+	jobType := string(kind)
 	row, err := m.repo.GetByType(ctx, jobType)
 	if err != nil {
 		return row, err
@@ -146,7 +166,8 @@ func (m *Manager) Get(ctx context.Context, jobType string) (jobModel.Job, error)
 	return row, nil
 }
 
-func (m *Manager) Delete(ctx context.Context, jobType string) error {
+func (m *Manager) Delete[P any](ctx context.Context, kind jobModel.Kind[P]) error {
+	jobType := string(kind)
 	if err := m.repo.Delete(ctx, jobType); err != nil {
 		return err
 	}
@@ -154,9 +175,9 @@ func (m *Manager) Delete(ctx context.Context, jobType string) error {
 	return nil
 }
 
-func (m *Manager) Cancel(jobType string) error {
+func (m *Manager) Cancel[P any](kind jobModel.Kind[P]) error {
 	m.mu.Lock()
-	cancel := m.cancels[jobType]
+	cancel := m.cancels[string(kind)]
 	m.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -207,6 +228,19 @@ func (m *Manager) Stop(context.Context) error {
 		c()
 	}
 	return nil
+}
+
+// encodePayload persists nothing for payload-less kinds (struct{}), so their
+// pending row carries an empty payload rather than "{}".
+func encodePayload[P any](p P) (string, error) {
+	if _, none := any(p).(struct{}); none {
+		return "", nil
+	}
+	b, err := json.Marshal(p)
+	if err != nil {
+		return "", fmt.Errorf("encode %T payload: %w", p, err)
+	}
+	return string(b), nil
 }
 
 func mustJSON(v any) string {

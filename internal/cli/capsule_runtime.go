@@ -18,7 +18,7 @@ import (
 type capsuleRuntime struct {
 	db      *gorm.DB
 	kv      kvstore.Store
-	cache   cache.ICache[string, any]
+	cache   *cache.Cache
 	storage *storage.Manager
 	tx      transaction.Transactor
 }

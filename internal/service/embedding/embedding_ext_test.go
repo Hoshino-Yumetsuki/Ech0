@@ -265,6 +265,7 @@ func TestBackfill_PreSeamGates(t *testing.T) {
 		kv.EXPECT().Get(ctx, commonModel.EmbeddingIndexStateKey).
 			Return(mustJSONState(t, testModel, testDim), nil).Once()
 		repo.EXPECT().EnsureVecTable(ctx, testDim).Return(nil).Once()
+		repo.EXPECT().PruneOrphans(ctx).Return(0, nil).Once()
 		_, err := svc.Backfill(ctx, nil)
 		require.ErrorIs(t, err, context.Canceled)
 	})

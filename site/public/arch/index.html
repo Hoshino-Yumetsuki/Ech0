@@ -1,0 +1,1824 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Served at /arch with or without the trailing slash: every relative asset resolves under /arch/ -->
+<base href="/arch/">
+<title>Ech0 Architecture</title>
+<meta name="description" content="Ech0 交互式架构图：单个 Go 二进制的进程全景，以及 pkg/ 自研库、事件总线、webhook、存储、生命周期的内部结构。">
+<link rel="canonical" href="https://www.ech0.app/arch">
+<link rel="icon" href="logo.svg">
+<style>
+  :root {
+    --ink: #1f2328;
+    --muted: #656d76;
+    --line: #57606a;
+    --faint: #d0d7de;
+    --bg: #ffffff;
+    --ech0: #e8490a;       /* Ech0's own orange: the process frame, the HTTP entry and the domains */
+    --pkg: #8250df;        /* pkg/: the in-repo libraries */
+    --infra: #0969da;      /* internal/ infrastructure */
+    --bus: #bf8700;        /* pub / sub through the event bus */
+    --hook: #bf3989;       /* outbound webhooks */
+    --stream: #1b7c83;     /* SSE / WebSocket streams */
+    --ai: #1a7f37;         /* LLM / embedding traffic */
+    --store: #cf222e;      /* persistence: disk, SQLite, S3 */
+    --client: #eac54f;     /* Ech0's own clients' frame */
+    --icon-filter: none;   /* monochrome icons are drawn dark; inverted in dark mode */
+    --sans: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+    --mono: "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink: #e6edf3; --muted: #8d96a0; --line: #8b949e; --faint: #30363d; --bg: #0d1117;
+      --ech0: #ff7433; --pkg: #a371f7; --infra: #4493f8; --bus: #d29922; --hook: #db61a2;
+      --stream: #39c5cf; --ai: #3fb950; --store: #f85149; --client: #f2cc60; --icon-filter: invert(1);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink: #e6edf3; --muted: #8d96a0; --line: #8b949e; --faint: #30363d; --bg: #0d1117;
+    --ech0: #ff7433; --pkg: #a371f7; --infra: #4493f8; --bus: #d29922; --hook: #db61a2;
+    --stream: #39c5cf; --ai: #3fb950; --store: #f85149; --client: #f2cc60; --icon-filter: invert(1);
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--sans); }
+  img.mono { filter: var(--icon-filter); }
+
+  header { padding: 32px 40px 0; }
+  header .brand { display: flex; align-items: center; gap: 14px; }
+  header h1 { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 600; color: var(--ech0); }
+  header h1 img { width: 26px; height: 26px; }
+  header p { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  header p.meta { font: 11px var(--mono); margin-top: 4px; }
+  header p.meta a { color: inherit; }
+  header p.hint { display: flex; flex-wrap: wrap; gap: 6px 20px; }
+  header p.hint button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+  header p.hint button:hover { color: var(--ink); }
+  header kbd { font: inherit; padding: 0 4px; border: 1px solid var(--faint); }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-top: 12px; font-size: 12px; color: var(--muted); }
+  .legend span { display: flex; align-items: center; gap: 8px; }
+  .legend i { width: 28px; border-top: 1.5px solid var(--line); }
+  .legend i.bus { border-top-style: dashed; border-color: var(--bus); }
+  .legend i.hook { border-color: var(--hook); }
+  .legend i.stream { border-color: var(--stream); }
+  .legend i.sse { border-top: 4px double var(--stream); }
+  .legend i.ai { border-color: var(--ai); }
+  .legend i.store { border-top-width: 2.5px; border-color: var(--store); }
+  .legend i.life { border-top-style: dotted; border-color: var(--ink); }
+
+  /* Info, theme and watermark buttons beside the title: the theme shows a moon in light mode, a sun in dark */
+  #info, #theme, #wm-toggle {
+    display: grid; place-items: center; width: 28px; height: 28px; padding: 0; cursor: pointer;
+    color: var(--muted); background: var(--bg); border: 1px solid var(--faint);
+  }
+  #info:hover, #theme:hover, #wm-toggle:hover { color: var(--ink); border-color: var(--line); }
+  #wm-toggle[aria-pressed="true"] { color: var(--bg); background: var(--ink); border-color: var(--ink); }
+  #info svg, #theme svg, #wm-toggle svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  #theme .sun { display: none; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) #theme .sun { display: block; }
+    :root:not([data-theme="light"]) #theme .moon { display: none; }
+  }
+  :root[data-theme="dark"] #theme .sun { display: block; }
+  :root[data-theme="dark"] #theme .moon { display: none; }
+
+  /* Hand tool: drag anywhere to pan; links and the toggle keep their pointer */
+  html { cursor: grab; }
+  html.panning, html.panning * { cursor: grabbing; }
+
+  /* About: what Ech0 is and what the filled corner tags mean; the page behind is dimmed */
+  #about { width: min(660px, calc(100% - 32px)); margin: auto; padding: 0; color: var(--ink); background: var(--bg); border: 1px solid var(--line); cursor: auto; }
+  #about::backdrop { background: rgb(0 0 0 / .45); }
+  #about > div { position: relative; padding: 24px 28px 28px; }
+  #about h2 { font-size: 16px; font-weight: 600; }
+  #about h3 { margin: 22px 0 10px; font: 600 10px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  #about p { font-size: 13px; line-height: 1.7; margin-top: 8px; }
+  #about :is(p, dd) code { font: 12px var(--mono); }
+  #about form { position: absolute; top: 18px; right: 18px; }
+  #about ol { padding-left: 20px; font-size: 13px; line-height: 1.9; columns: 2; column-gap: 24px; }
+  #about ol button, #card .next { font: 600 13px var(--sans); color: var(--ink); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+  #about ol span { color: var(--muted); }
+  :is(#about, #card) .close { width: 28px; height: 28px; padding: 0; font-size: 18px; line-height: 1; cursor: pointer; color: var(--muted); background: var(--bg); border: 1px solid var(--faint); }
+  :is(#about, #card) .close:hover { color: var(--ink); border-color: var(--line); }
+  #about dl { display: grid; grid-template-columns: max-content 1fr; gap: 12px 16px; align-items: center; font-size: 13px; line-height: 1.5; }
+  #about dt { display: flex; align-items: center; gap: 8px; }
+  :is(#about, #card) .tag { font: 600 11px/1 var(--mono); letter-spacing: .08em; padding: 6px 10px; background: var(--c); color: #fff; }
+
+  /* Tag cards: a filled tag opens a card about its frame, docked bottom-right so the frame stays in view */
+  [data-card] { cursor: pointer; }
+  [data-card]:hover { text-decoration: underline; text-underline-offset: 3px; }
+  [data-card].active { outline: 2px solid var(--ink); outline-offset: 2px; }
+  [data-card] > .step {                     /* the tour's number, flush with the tag's left end */
+    display: inline-block; margin: -6px 8px -6px -10px; padding: 6px 7px;
+    font: 600 11px/1 var(--mono); background: var(--ink); color: var(--bg);
+  }
+  .head[data-card] > .step { margin-right: 2px; }
+  #card {
+    position: fixed; right: 16px; bottom: 16px; z-index: 10; width: min(400px, calc(100% - 32px));
+    padding: 16px 18px; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+    box-shadow: 0 6px 24px rgb(0 0 0 / .15); cursor: auto;
+  }
+  #card .close { position: absolute; top: 12px; right: 12px; }
+  #card h2 { margin-top: 12px; font-size: 15px; font-weight: 600; }
+  #card p { margin-top: 6px; font-size: 13px; line-height: 1.7; }
+  #card p code { font: 12px var(--mono); }
+  #card .foot {
+    display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 10px;
+    border-top: 1px solid var(--faint); font: 11px var(--mono); color: var(--muted);
+  }
+
+  /* Canvas: every element is absolutely positioned */
+  #canvas { position: relative; width: 4660px; height: 5820px; }
+  #signature { position: absolute; right: 40px; bottom: 24px; font: 11px var(--mono); color: var(--muted); }
+  /* Watermark: a faint credit tiled over the whole diagram, off until toggled; clicks pass through it */
+  #watermark {
+    position: absolute; inset: 0; z-index: 3; pointer-events: none; background: var(--ink); opacity: .07;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='520' height='300'%3E%3Ctext x='260' y='150' text-anchor='middle' transform='rotate%28-20 260 150%29' font-family='monospace' font-size='16' font-weight='600'%3EDesigned By L1nSn0w %26amp%3B Claude%3C/text%3E%3C/svg%3E") 0 0 / 520px 300px;
+  }
+  #edges { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
+  #edges .edge { fill: none; stroke: var(--line); stroke-width: 1.25; }
+  #edges .arrowhead { fill: var(--line); }
+  #edges .dot { fill: var(--ink); }
+  #edges .edge-label { font: 11px var(--mono); fill: var(--muted); }
+  #edges .edge-label.strong { font-weight: 700; fill: var(--ink); }
+  #edges .edge.bus { stroke: var(--bus); stroke-dasharray: 6 4; }
+  #edges .edge.hook { stroke: var(--hook); }
+  #edges .edge.stream { stroke: var(--stream); }
+  #edges .edge.sse { stroke: var(--stream); stroke-width: 4; }         /* SSE: a double line, see sse-core */
+  #edges .edge.sse-core { stroke: var(--bg); stroke-width: 1.5; }
+  #edges .edge.ai { stroke: var(--ai); }
+  #edges .edge.store { stroke: var(--store); stroke-width: 2; }
+  #edges .edge.life { stroke: var(--ink); stroke-dasharray: 2 3; }
+  #edges .dot.bus, #edges .arrowhead.bus, #edges .edge-label.bus { fill: var(--bus); }
+  #edges .dot.hook, #edges .arrowhead.hook, #edges .edge-label.hook { fill: var(--hook); }
+  #edges .dot.stream, #edges .arrowhead.stream, #edges .edge-label.stream,
+  #edges .dot.sse, #edges .arrowhead.sse, #edges .edge-label.sse { fill: var(--stream); }
+  #edges .dot.ai, #edges .arrowhead.ai, #edges .edge-label.ai { fill: var(--ai); }
+  #edges .dot.store, #edges .arrowhead.store, #edges .edge-label.store { fill: var(--store); }
+  #edges .arrowhead.life { fill: var(--ink); }
+
+  /* Zones: labelled areas */
+  .zone { position: absolute; z-index: 0; }
+  .zone > .tag {
+    position: absolute; top: -1px; left: -1px; white-space: nowrap;
+    font: 600 11px/1 var(--mono); letter-spacing: .08em;
+    padding: 6px 10px;
+  }
+  .zone > .tag > .sub {
+    position: absolute; left: 100%; top: 50%; transform: translateY(-50%); margin-left: 8px;
+    font: 600 10px/1 var(--mono); letter-spacing: .06em; white-space: nowrap; color: var(--c, var(--muted));
+  }
+  .zone.platform { --c: var(--ech0); border: 1.5px solid var(--ech0); }
+  .zone.platform > .tag { background: var(--ech0); color: #fff; }
+  .zone.outside { border: 1px dashed var(--faint); }
+  .zone.outside > .tag { background: var(--muted); color: var(--bg); }
+  .zone.clients { border: 1.5px solid var(--client); }
+  .zone.clients > .tag { background: var(--client); color: #1f2328; }
+  .zone.store { border: 1.5px solid var(--store); }
+  .zone.store > .tag { background: var(--store); color: #fff; }
+  /* A coloured frame: the overview's infra and pkg rows, and every deep-dive panel below them */
+  .zone.frame { border: 1.5px solid var(--c); }
+  .zone.frame > .tag { background: var(--c); color: #fff; }
+  .zone.panel { border: 1.5px solid var(--c); }
+  .zone.panel > .tag { background: var(--c); color: #fff; }
+
+  /* Boxes: components that contain other nodes */
+  .box { position: absolute; z-index: 0; background: var(--bg); border: 1px solid var(--ink); }
+  .box.note { border: 1px dashed var(--line); }
+  .box > .head {
+    position: absolute; top: 14px; left: 16px;
+    display: flex; align-items: center; gap: 8px; white-space: nowrap;
+  }
+  .box > .head img { width: 20px; height: 20px; }
+  .box > .head .name { font-size: 14px; font-weight: 600; }
+  .box > .head .sub { font-size: 12px; color: var(--muted); }
+  .box > .head .sub code, .box > .head .name code { font-family: var(--mono); font-size: 11px; }
+  /* A filled head: the frame's own corner tag, with a sub beside it */
+  .box.tagged { border: 1.5px solid var(--c); }
+  .box.tagged > .head { top: -1px; left: -1px; gap: 6px; padding: 6px 10px; background: var(--c); color: #fff; }
+  .box.tagged > .head img { width: 13px; height: 13px; filter: brightness(0) invert(1); }
+  .box.tagged > .head .name { font: 600 11px/1 var(--mono); letter-spacing: .08em; }
+  .box.tagged > .head .sub {
+    position: absolute; left: 100%; top: 50%; transform: translateY(-50%); margin-left: 8px;
+    font: 600 10px/1 var(--mono); letter-spacing: .06em; color: var(--c);
+  }
+
+  /* Responsibility list inside a box */
+  .box > .list { position: absolute; top: 44px; left: 16px; right: 16px; }
+  .box.tagged > .list { top: 34px; }
+  .list .group {
+    font: 600 10px/1 var(--mono); letter-spacing: .08em;
+    color: var(--muted); margin: 10px 0 6px;
+  }
+  .list .row {
+    display: flex; align-items: center; gap: 12px; height: 28px;
+    border-top: 1px solid var(--faint); font-size: 13px;
+  }
+  .list .row > span { flex: none; width: var(--name-w, 130px); font-weight: 500; }
+  .list .row > code { font: 11px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* Route table inside the HTTP entry */
+  .routes { position: absolute; left: 22px; right: 22px; }
+  .routes .group { font: 600 10px/1 var(--mono); letter-spacing: .08em; color: var(--ech0); margin-bottom: 8px; }
+  .routes .grid { display: grid; grid-template-columns: 150px 1fr; column-gap: 12px; font: 11px/24px var(--mono); white-space: nowrap; }
+  .routes .grid code { border-top: 1px solid var(--faint); }
+  .routes .grid span { color: var(--muted); border-top: 1px solid var(--faint); }
+  .box > .foot { position: absolute; left: 22px; right: 22px; bottom: 12px; font: 11px var(--mono); color: var(--muted); }
+
+  /* Cards: one step of a flow, placed on the canvas so lines can reach them */
+  .card { position: absolute; z-index: 2; padding: 9px 12px; background: var(--bg); border: 1px solid var(--line); }
+  .card b { display: block; font-size: 13px; font-weight: 600; }
+  .card code { display: block; margin-top: 4px; font: 11px var(--mono); color: var(--muted); white-space: nowrap; }
+  .aside { position: absolute; z-index: 2; font: 11px var(--mono); color: var(--muted); white-space: nowrap; }
+  .caption { position: absolute; z-index: 2; font: 600 10px/1 var(--mono); letter-spacing: .08em; color: var(--muted); }
+
+  /* Nodes */
+  .node {
+    position: absolute; z-index: 2;
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 14px;
+    background: var(--bg); border: 1px solid var(--ink);
+  }
+  .node img { width: 24px; height: 24px; flex: none; }
+  .node .icons { display: flex; gap: 4px; flex: none; }
+  .node .name { font-size: 14px; font-weight: 600; white-space: nowrap; }
+  .node .name code { font: 12px var(--mono); }
+  .node .sub { font-size: 12px; color: var(--muted); margin-top: 2px; white-space: nowrap; }
+  .node .sub code { font-family: var(--mono); font-size: 11px; }
+  .node.infra { border: 1.5px solid var(--infra); }
+  .node.pkg { border: 1.5px solid var(--pkg); }
+  .node.pkg.test { border-style: dashed; }
+  .node.sub { border: 1.5px dashed var(--bus); }
+  .node.mw { padding: 0 10px; }
+  .node.mw .name { font-size: 13px; }
+  .node.mw .sub { font-size: 11px; }
+  /* The one event bus: a bar every publisher and subscriber attaches to */
+  .node.bus { border: 1.5px solid var(--bus); gap: 10px; white-space: nowrap; }
+  .node.bus img { width: 20px; height: 20px; }
+  .node.bus .sub { margin-top: 0; }
+  .node.flat { gap: 10px; white-space: nowrap; }
+  .node.flat .sub { margin-top: 0; }
+
+  /* busen mailboxes: one lane per worker, oldest on the right; key A picked out */
+  .lane {
+    position: absolute; z-index: 2; display: flex; align-items: center; padding: 0 12px;
+    background: var(--bg); border: 1px solid var(--faint);
+  }
+  .lane > b { font: 600 11px var(--mono); color: var(--muted); }
+  .lane .recs { display: flex; gap: 6px; margin-left: auto; }
+  .lane .recs i { font: 600 11px/1 var(--mono); font-style: normal; padding: 7px 9px; border: 1px solid var(--line); color: var(--muted); }
+  .lane .recs i.hl { border-color: var(--bus); color: var(--bus); }
+
+  /* Event catalog: one row per event, one column per subscriber */
+  .matrix {
+    position: absolute; z-index: 2; display: grid;
+    grid-template-columns: 250px 300px 110px 1fr repeat(4, 120px);
+    background: var(--bg); border-bottom: 1px solid var(--faint);
+  }
+  .matrix > div { border-top: 1px solid var(--faint); padding: 0 10px; font: 11px/26px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; }
+  .matrix > .h { border-top: 0; padding: 6px 10px 8px; font: 600 11px/1.4 var(--mono); color: var(--ink); }
+  .matrix > .h small { display: block; font-weight: 400; font-size: 10px; color: var(--muted); }
+  .matrix > .h.c, .matrix > .m { text-align: center; }
+  .matrix > .ev { font: 600 12px/26px var(--sans); color: var(--ink); }
+  .matrix > .m { color: var(--bus); font-size: 14px; }
+
+  /* Lifecycle timeline: one lane per part, against the app's phases */
+  .tl-guide { position: absolute; z-index: 1; border-left: 1px dashed var(--faint); }
+  .tl-guide.key { border-left-color: var(--line); }
+  .tl-tick { position: absolute; z-index: 2; font: 11px var(--mono); color: var(--muted); white-space: nowrap; }
+  .tl-tick b { color: var(--ink); }
+  .tl-lane { position: absolute; z-index: 2; display: flex; align-items: center; height: 28px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .tl-bar {
+    position: absolute; z-index: 2; display: flex; align-items: center; height: 28px; padding: 0 10px;
+    font: 11px var(--mono); white-space: nowrap; overflow: hidden; background: var(--bg); border: 1px solid var(--ink);
+  }
+  .tl-bar.fill { background: var(--faint); border-color: var(--faint); }
+  .tl-bar.soft { border-style: dashed; border-color: var(--line); color: var(--muted); }
+  .tl-cut { position: absolute; z-index: 3; width: 2px; height: 28px; background: var(--ink); }
+</style>
+</head>
+<body>
+
+<main id="page">
+<header>
+  <div class="brand">
+    <h1><img src="logo.svg" alt="">Ech0 Architecture</h1>
+    <button id="info" type="button" title="关于 Ech0 与这张图" aria-label="关于 Ech0 与这张图">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+    </button>
+    <button id="theme" type="button" title="切换亮 / 暗" aria-label="切换亮 / 暗">
+      <svg class="moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+      <svg class="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+    </button>
+    <button id="wm-toggle" type="button" aria-pressed="false" title="切换水印" aria-label="切换水印">
+      <svg viewBox="0 0 24 24"><path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11Z"/></svg>
+    </button>
+  </div>
+  <p>自托管的轻量个人微博（时间线）· 单个 Go 二进制同时提供 REST API 与内嵌 SPA</p>
+  <p class="meta">Author: <a href="https://github.com/lin-snow">L1nSn0w</a> · Repo: <a href="https://github.com/lin-snow/Ech0">https://github.com/lin-snow/Ech0</a> · 依据 main@228fa33b 的代码绘制 · 2026-09-28</p>
+  <p class="meta hint">
+    <span>✋ 拖拽平移</span>
+    <span>🔍 <kbd>⌘</kbd> / <kbd>Ctrl</kbd> + 滚轮或双指捏合缩放</span>
+    <span>🔄 <kbd>0</kbd> 回到 100%</span>
+    <span>👆 点击实心角标查看说明</span>
+    <span>🧭 <button type="button" data-go="users">开始导览</button>，沿编号角标逐步阅读</span>
+  </p>
+  <div class="legend">
+    <span><i></i>同步调用</span>
+    <span><i class="bus"></i>Pub / Sub · 经 Event Bus</span>
+    <span><i class="hook"></i>Webhook 出站</span>
+    <span><i class="stream"></i>流 · WebSocket</span>
+    <span><i class="sse"></i>SSE · 服务端推送</span>
+    <span><i class="ai"></i>LLM / Embedding</span>
+    <span><i class="store"></i>持久化读写</span>
+    <span><i class="life"></i>生命周期 · start / stop</span>
+  </div>
+</header>
+
+<div id="canvas">
+  <svg id="edges">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
+      </marker>
+      <marker id="arrow-bus" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path class="arrowhead bus" d="M0,0 L10,5 L0,10 z"/>
+      </marker>
+      <marker id="arrow-hook" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path class="arrowhead hook" d="M0,0 L10,5 L0,10 z"/>
+      </marker>
+      <marker id="arrow-stream" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path class="arrowhead stream" d="M0,0 L10,5 L0,10 z"/>
+      </marker>
+      <marker id="arrow-sse" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="11" markerHeight="11" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+        <path class="arrowhead sse" d="M0,0 L10,5 L0,10 z"/>
+      </marker>
+      <marker id="arrow-ai" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path class="arrowhead ai" d="M0,0 L10,5 L0,10 z"/>
+      </marker>
+      <marker id="arrow-store" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+        <path class="arrowhead store" d="M0,0 L10,5 L0,10 z"/>
+      </marker>
+      <marker id="arrow-life" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path class="arrowhead life" d="M0,0 L10,5 L0,10 z"/>
+      </marker>
+    </defs>
+  </svg>
+
+  <!-- ======================================================================
+       Overview: clients on the left, the one Go process in the middle,
+       disk and object storage on the right. Inside the process, top to bottom:
+       HTTP · domains · capabilities → event bus → subscribers → infra → pkg/
+       ====================================================================== -->
+
+  <!-- ===== Outside, left ===== -->
+  <div class="zone outside" style="left:40px; top:300px; width:300px; height:600px">
+    <span class="tag" data-card="users">外部用户</span>
+  </div>
+  <div class="node" id="owner" style="left:80px; top:360px; width:220px; height:64px">
+    <img class="mono" src="icons/staff.svg" alt="">
+    <div><div class="name">站长 / 管理员</div><div class="sub">owner · admin</div></div>
+  </div>
+  <div class="node" id="visitor" style="left:80px; top:440px; width:220px; height:64px">
+    <img class="mono" src="icons/individual.svg" alt="">
+    <div><div class="name">访客</div><div class="sub">浏览 · 评论 · 点赞</div></div>
+  </div>
+  <div class="node" id="integrator" style="left:80px; top:580px; width:220px; height:64px">
+    <img class="mono" src="icons/cli.svg" alt="">
+    <div><div class="name">集成方</div><div class="sub">脚本 · CI · 第三方</div></div>
+  </div>
+  <div class="node" id="aiuser" style="left:80px; top:680px; width:220px; height:64px">
+    <img class="mono" src="icons/agent.svg" alt="">
+    <div><div class="name">AI 助手用户</div><div class="sub">Claude Desktop · IDE</div></div>
+  </div>
+  <div class="node" id="subscriber" style="left:80px; top:800px; width:220px; height:64px">
+    <img class="mono" src="icons/users.svg" alt="">
+    <div><div class="name">订阅者</div><div class="sub">RSS · 搜索引擎</div></div>
+  </div>
+
+  <div class="zone clients" style="left:420px; top:300px; width:300px; height:600px">
+    <span class="tag" data-card="clients">客户端</span>
+  </div>
+  <div class="node" id="spa" style="left:460px; top:400px; width:220px; height:64px">
+    <img class="mono" src="icons/console.svg" alt="">
+    <div><div class="name">Web SPA</div><div class="sub">Vue 3 · 内嵌 · Bearer JWT</div></div>
+  </div>
+  <div class="node" id="apiclient" style="left:460px; top:580px; width:220px; height:64px">
+    <img class="mono" src="icons/api.svg" alt="">
+    <div><div class="name">API Client</div><div class="sub">access token · scope</div></div>
+  </div>
+  <div class="node" id="mcpclient" style="left:460px; top:680px; width:220px; height:64px">
+    <img class="mono" src="icons/mcp.svg" alt="">
+    <div><div class="name">MCP Client</div><div class="sub">aud <code>mcp-remote</code></div></div>
+  </div>
+  <div class="node" id="rss" style="left:460px; top:800px; width:220px; height:64px">
+    <img class="mono" src="icons/site.svg" alt="">
+    <div><div class="name">RSS / 爬虫</div><div class="sub">rss · sitemap · robots</div></div>
+  </div>
+
+  <div class="zone outside" style="left:40px; top:1000px; width:300px; height:220px">
+    <span class="tag" data-card="receivers">Webhook 接收方</span>
+  </div>
+  <div class="node" id="recv" style="left:80px; top:1080px; width:220px; height:64px">
+    <img class="mono" src="icons/webhook.svg" alt="">
+    <div><div class="name">Webhook 端点</div><div class="sub">校验 X-Ech0-Signature</div></div>
+  </div>
+
+  <!-- ===== Outside, top: services Ech0 calls out to ===== -->
+  <div class="zone outside" style="left:1720px; top:40px; width:1840px; height:150px">
+    <span class="tag" data-card="thirdparty">外部服务</span>
+  </div>
+  <div class="node" id="oauth" style="left:1760px; top:88px; width:260px; height:64px">
+    <img class="mono" src="icons/identity.svg" alt="">
+    <div><div class="name">OAuth2 / OIDC</div><div class="sub">GitHub · Google · QQ · 自定义</div></div>
+  </div>
+  <div class="node" id="remote" style="left:2080px; top:88px; width:260px; height:64px">
+    <img class="mono" src="icons/connect.svg" alt="">
+    <div><div class="name">其他 Ech0 实例</div><div class="sub">connect 互联 · 聚合时间线</div></div>
+  </div>
+  <div class="node" id="embedapi" style="left:2400px; top:88px; width:300px; height:64px">
+    <img class="mono" src="icons/openai.svg" alt="">
+    <div><div class="name">Embedding API</div><div class="sub">OpenAI 兼容 <code>/v1/embeddings</code></div></div>
+  </div>
+  <div class="node" id="llm" style="left:3080px; top:88px; width:380px; height:64px">
+    <span class="icons"><img class="mono" src="icons/openai.svg" alt=""><img class="mono" src="icons/anthropic.svg" alt=""></span>
+    <div><div class="name">LLM Provider</div><div class="sub">Chat Completions · Responses · Messages</div></div>
+  </div>
+
+  <!-- ===== Outside, right ===== -->
+  <div class="zone outside" style="left:4280px; top:250px; width:300px; height:150px">
+    <span class="tag" data-card="ops">运维</span>
+  </div>
+  <div class="node" id="op" style="left:4320px; top:300px; width:220px; height:64px">
+    <img class="mono" src="icons/cli.svg" alt="">
+    <div><div class="name">Shell</div><div class="sub">直接运行 <code>ech0</code></div></div>
+  </div>
+
+  <div class="zone store" style="left:4280px; top:1240px; width:300px; height:400px">
+    <span class="tag" data-card="data">data/ · 本地磁盘</span>
+  </div>
+  <div class="node" id="sqlite" style="left:4320px; top:1306px; width:220px; height:64px">
+    <img class="mono" src="icons/sqlite.svg" alt="">
+    <div><div class="name">ech0.db</div><div class="sub">SQLite · WAL · vec0</div></div>
+  </div>
+  <div class="node" id="applog" style="left:4320px; top:1400px; width:220px; height:64px">
+    <img class="mono" src="icons/logs.svg" alt="">
+    <div><div class="name">app.log</div><div class="sub">JSON 行 · 100 MB × 5</div></div>
+  </div>
+  <div class="node" id="files" style="left:4320px; top:1554px; width:220px; height:64px">
+    <img class="mono" src="icons/disk.svg" alt="">
+    <div><div class="name">files/</div><div class="sub">images · audios · videos …</div></div>
+  </div>
+
+  <div class="zone store" style="left:4280px; top:1680px; width:300px; height:150px">
+    <span class="tag" data-card="s3">对象存储 · 可选</span>
+  </div>
+  <div class="node" id="s3" style="left:4320px; top:1722px; width:220px; height:64px">
+    <img class="mono" src="icons/s3.svg" alt="">
+    <div><div class="name">S3 兼容存储</div><div class="sub">AWS · MinIO · R2 · CDN</div></div>
+  </div>
+
+  <!-- ===== The Ech0 process ===== -->
+  <div class="zone platform" style="left:800px; top:240px; width:3400px; height:1590px">
+    <span class="tag" data-card="platform">Ech0 · 单个 Go 二进制<span class="sub">Go 1.27 · CGO (SQLite + sqlite-vec) · 默认 :6277</span></span>
+  </div>
+
+  <!-- HTTP entry: global middleware in order, then the posture every route declares -->
+  <div class="box tagged" id="http" style="left:840px; top:300px; width:800px; height:600px; --c: var(--ech0)">
+    <div class="head" data-card="http">
+      <img src="icons/server.svg" alt="">
+      <span class="name">HTTP 入口</span>
+      <span class="sub">Gin + Huma · internal/router · internal/middleware</span>
+    </div>
+    <div class="routes" style="top:222px">
+      <div class="group">路由组 · 挂载顺序见 router.SetupRouter</div>
+      <div class="grid">
+        <code>/</code><span>SPA fallback · robots · sitemap · rss · healthz · OAuth 回调</span>
+        <code>/api/files</code><span>本地静态文件 · StaticFileSecurity · 先于全局中间件</span>
+        <code>/api · Huma</code><span>~100 个 JSON 操作 · posture 声明鉴权 · 生成 OpenAPI</span>
+        <code>/api/cap/*</code><span>gocap 验证码 HTTP · public</span>
+        <code>/api · raw gin</code><span>POST /chat (SSE) · /files/upload · /file/:id/stream</span>
+        <code>/api · raw gin</code><span>/system/logs/stream (SSE) · /migration/upload · /export/download</span>
+        <code>/ws</code><span>/ws/system/logs · handler 自己校验 ?token</span>
+        <code>/mcp</code><span>RequireAuth → RateLimit 20 rps / 40 → OriginGuard → aud mcp-remote</span>
+        <code>/api/docs</code><span>openapi.json · openapi.yaml · Stoplight / Scalar</span>
+      </div>
+    </div>
+    <div class="foot">Huma handler: <code>func(ctx, *Input) (Result[T], error)</code> → humares.Wrap 本地化 + 错误映射</div>
+  </div>
+  <div class="node mw" id="mw1" style="left:862px; top:352px; width:132px; height:56px">
+    <div><div class="name">Recovery</div><div class="sub">+ Logger (debug)</div></div>
+  </div>
+  <div class="node mw" id="mw2" style="left:1014px; top:352px; width:132px; height:56px">
+    <div><div class="name">PoweredBy</div><div class="sub">X-Powered-By</div></div>
+  </div>
+  <div class="node mw" id="mw3" style="left:1166px; top:352px; width:132px; height:56px">
+    <div><div class="name">CORS</div><div class="sub">OPTIONS → 204</div></div>
+  </div>
+  <div class="node mw" id="mw4" style="left:1318px; top:352px; width:132px; height:56px">
+    <div><div class="name">i18n</div><div class="sub">lang → X-Locale</div></div>
+  </div>
+  <div class="node mw" id="mw5" style="left:1470px; top:352px; width:132px; height:56px">
+    <div><div class="name">WriteGuard</div><div class="sub">写锁 → 503</div></div>
+  </div>
+  <div class="node" id="authmw" style="left:862px; top:440px; width:740px; height:64px">
+    <img class="mono" src="icons/authz.svg" alt="">
+    <div><div class="name">Posture · <code>public()</code> · <code>optional()</code> · <code>secured(scopes…).audience(…)</code></div>
+      <div class="sub">NoCache → RequireAuth / OptionalAuth (JWT + 撤销检查) → RequireScopes / RequireAudience → viewer.Context</div></div>
+  </div>
+
+  <!-- Domains: one box, fifteen rows; edges attach to the box, not to the rows -->
+  <div class="box tagged" id="domains" style="left:1720px; top:300px; width:1180px; height:600px; --c: var(--ech0); --name-w: 100px">
+    <div class="head" data-card="domains">
+      <img src="icons/pkg.svg" alt="">
+      <span class="name">业务领域 · 15 个</span>
+      <span class="sub">handler → service → repository → model · 跨层别名 xxxHandler / xxxService / xxxRepository / xxxModel</span>
+    </div>
+    <div class="list">
+      <div class="group">内容与互动</div>
+      <div class="row"><span>echo</span><code>时间线条目 · 扩展 · 标签 · 点赞 2 rps 幂等限流 · emit Echo*</code></div>
+      <div class="row"><span>comment</span><code>审核流 · 蜜罐 / captcha / form-token · 集成评论免 captcha (comment:write + aud integration) · emit Comment*</code></div>
+      <div class="row"><span>file</span><code>上传 · 临时文件 · 预签名直传 24h · storage.Manager · emit ResourceUploaded</code></div>
+      <div class="row"><span>connect</span><code>实例互联 · 远端发现与健康检查 · 聚合时间线</code></div>
+      <div class="group">身份与配置</div>
+      <div class="row"><span>user</span><code>资料 · owner / admin · 语言偏好 · emit User*</code></div>
+      <div class="row"><span>auth</span><code>JWT access + refresh · OAuth2 / OIDC · Passkey · 撤销黑名单 · access token 的 scope / audience</code></div>
+      <div class="row"><span>init</span><code>首次引导 · owner 建立检测</code></div>
+      <div class="row"><span>setting</span><code>系统 · S3 · OAuth · Passkey · Agent · Embedding · 评论 · Webhook · 快照计划 · emit UpdateSnapshotSchedule</code></div>
+      <div class="group">智能与检索</div>
+      <div class="row"><span>embedding</span><code>sqlite-vec 表 vec_echo · 内容哈希去重 · Search · Backfill (job)</code></div>
+      <div class="row"><span>copilot</span><code>Chat RAG (SSE) · 近期总结 · 注入 search_echos / summarize_echos / stats_overview → agent.Run</code></div>
+      <div class="row"><span>mcp</span><code>Registry + Adapter → 9 个领域 service</code></div>
+      <div class="group">运维与数据</div>
+      <div class="row"><span>dashboard</span><code>访客 7 日热力 · 系统日志 (WS / SSE / 文件尾) · 指标</code></div>
+      <div class="row"><span>migrator</span><code>导入 ech0 / memos / capsule · 导出 snapshot / capsule · 经 job 异步 · emit SystemExport</code></div>
+      <div class="row"><span>common</span><code>分页 · 热力图 · KeyValue 仓储 · 共享 DTO</code></div>
+      <div class="row"><span>web</span><code>内嵌 SPA · SPA fallback · visitor.Record</code></div>
+    </div>
+  </div>
+
+  <!-- Capabilities: Agent out to the LLMs, MCP in from them -->
+  <div class="box tagged" id="agent" style="left:2980px; top:300px; width:580px; height:280px; --c: var(--ai); --name-w: 80px">
+    <div class="head" data-card="agent">
+      <img src="icons/copilot.svg" alt="">
+      <span class="name">internal/agent</span>
+      <span class="sub">出站 · 零领域依赖</span>
+    </div>
+    <div class="list">
+      <div class="row"><span>Provider</span><code>OpenAI Chat · OpenAI Responses · Anthropic</code></div>
+      <div class="row"><span>Run</span><code>ReAct ≤ 3 轮工具 + 1 轮无工具收尾</code></div>
+      <div class="row"><span>Tools</span><code>Tool{Def, Execute} 由 copilot 注入</code></div>
+      <div class="row"><span>Mutate</span><code>Plan → Confirm → Apply</code></div>
+      <div class="row"><span>Events</span><code>delta · reasoning · searching · tool_result · done</code></div>
+      <div class="row"><span>Generate</span><code>非流式 · 近期总结</code></div>
+      <div class="row"><span>护栏</span><code>轮数 · 去重 · MaxContextTokens · 超时</code></div>
+    </div>
+  </div>
+  <div class="box tagged" id="mcp" style="left:2980px; top:620px; width:580px; height:280px; --c: var(--ai); --name-w: 80px">
+    <div class="head" data-card="mcp">
+      <img src="icons/mcp.svg" alt="">
+      <span class="name">internal/mcp</span>
+      <span class="sub">入站 · JSON-RPC 2.0</span>
+    </div>
+    <div class="list">
+      <div class="row"><span>协议</span><code>2026-07-28 (兼容 2025-*) · streamable-http</code></div>
+      <div class="row"><span>POST</span><code>只接受 POST · GET / DELETE → 405</code></div>
+      <div class="row"><span>Registry</span><code>~29 tools · ~10 resources · 每项声明 scope</code></div>
+      <div class="row"><span>dispatch</span><code>先校验 token scope，再调 Adapter</code></div>
+      <div class="row"><span>Adapter</span><code>包装 9 个领域 service 注册进 Registry</code></div>
+      <div class="row"><span>manifest</span><code>GET /api/mcp/manifest (Huma)</code></div>
+      <div class="row"><span>Token</span><code>access token · aud mcp-remote</code></div>
+    </div>
+  </div>
+
+  <!-- Boot chain and the app that starts and stops the components -->
+  <div class="node" id="cmd" style="left:3640px; top:300px; width:520px; height:64px">
+    <img class="mono" src="icons/cli.svg" alt="">
+    <div><div class="name">cmd/ech0 · Cobra</div><div class="sub">serve · tui · export · import · check · build · version</div></div>
+  </div>
+  <div class="node" id="boot" style="left:3640px; top:390px; width:520px; height:64px">
+    <img class="mono" src="icons/setting.svg" alt="">
+    <div><div class="name">bootstrap</div><div class="sub">Cobra 分发前 · config 单例 · 初始化 pkg/log</div></div>
+  </div>
+  <div class="node" id="wire" style="left:3640px; top:480px; width:520px; height:64px">
+    <img class="mono" src="icons/pkg.svg" alt="">
+    <div><div class="name">di.BuildApp</div><div class="sub">Wire · Infra · Visitor · Storage · Domain · Runtime · App</div></div>
+  </div>
+  <div class="box tagged" id="app" style="left:3640px; top:570px; width:520px; height:190px; --c: var(--ink); --name-w: 90px">
+    <div class="head" data-card="app">
+      <span class="name" style="color: var(--bg)">app.App</span>
+    </div>
+    <div class="list">
+      <div class="row"><span>BeforeStart</span><code>setting.Seed → registrar.Register()</code></div>
+      <div class="row"><span>Start</span><code>job → task → server · 失败逆序回滚</code></div>
+      <div class="row"><span>Run</span><code>阻塞至 SIGTERM / SIGINT</code></div>
+      <div class="row"><span>Stop</span><code>server → task → job · 共用 5s</code></div>
+      <div class="row"><span>AfterStop</span><code>registrar.Stop() → 排空 webhook 池</code></div>
+    </div>
+  </div>
+  <div class="node infra" id="job" style="left:3640px; top:980px; width:250px; height:84px">
+    <img class="mono" src="icons/job.svg" alt="">
+    <div><div class="name">job.Manager</div><div class="sub">一次性长任务</div><div class="sub">reindex · migration · export</div></div>
+  </div>
+  <div class="node infra" id="task" style="left:3910px; top:980px; width:250px; height:84px">
+    <img class="mono" src="icons/task.svg" alt="">
+    <div><div class="name">task.Manager</div><div class="sub">gocron v2 · UTC</div><div class="sub">cleanup · snapshot · visitor</div></div>
+  </div>
+
+  <!-- Event bus: under the domains that publish, over the subscribers -->
+  <div class="node bus" id="bus" style="left:1720px; top:960px; width:1180px; height:44px">
+    <img class="mono" src="icons/bus.svg" alt="">
+    <span class="name" data-card="bus">Event Bus</span>
+    <span class="sub"><code>internal/event/bus</code> · 包一个 <code>*busen.Bus</code> 单例 · 按 Go 类型路由 · 同 key 有序</span>
+  </div>
+  <div class="node sub" id="sub-webhook" style="left:1720px; top:1070px; width:280px; height:84px">
+    <div><div class="name">webhook.Dispatcher</div><div class="sub">同步 · 13 类事件</div><div class="sub">→ worker 池 6 / 6 → Sender</div></div>
+  </div>
+  <div class="node sub" id="sub-embed" style="left:2020px; top:1070px; width:280px; height:84px">
+    <div><div class="name">EmbeddingProcessor</div><div class="sub">AsyncParallel · Echo*</div><div class="sub">IndexEcho 3 次 · RemoveEcho</div></div>
+  </div>
+  <div class="node sub" id="sub-agent" style="left:2320px; top:1070px; width:280px; height:84px">
+    <div><div class="name">AgentProcessor</div><div class="sub">AsyncParallel · Echo C/U · UserDeleted</div><div class="sub">让 AI 近期总结失效</div></div>
+  </div>
+  <div class="node sub" id="sub-snapshot" style="left:2620px; top:1070px; width:280px; height:84px">
+    <div><div class="name">scheduled.Snapshot</div><div class="sub">AsyncSequential · 快照计划</div><div class="sub">task 内部自行订阅</div></div>
+  </div>
+
+  <!-- internal/ infrastructure: one row; the stateful singletons are injected once at the top -->
+  <div class="zone frame" style="left:840px; top:1240px; width:3320px; height:190px; --c: var(--infra)">
+    <span class="tag" data-card="infra">internal/ 基础设施<span class="sub">visitor.Tracker · storage.Manager · job.Manager 只在顶层注入一次</span></span>
+  </div>
+  <div class="node infra" id="captcha" style="left:870px; top:1296px; width:360px; height:84px">
+    <img class="mono" src="icons/captcha.svg" alt="">
+    <div><div class="name">captcha</div><div class="sub">gocap 引擎单例 · 不经 Wire</div><div class="sub">站点 ech0-comment · SiteVerify</div></div>
+  </div>
+  <div class="node infra" id="visitor-t" style="left:1278px; top:1296px; width:360px; height:84px">
+    <img class="mono" src="icons/visitor.svg" alt="">
+    <div><div class="name">visitor.Tracker</div><div class="sub">actor · PV / UV · 保留 7 天</div><div class="sub">单个 goroutine 持有全部状态</div></div>
+  </div>
+  <div class="node infra" id="setting" style="left:1686px; top:1296px; width:360px; height:84px">
+    <img class="mono" src="icons/setting.svg" alt="">
+    <div><div class="name">setting</div><div class="sub">Spec[T] · Get / Set / Seed</div><div class="sub">JSON 存进 durableKV</div></div>
+  </div>
+  <div class="node infra" id="kvstore" style="left:2094px; top:1296px; width:360px; height:84px">
+    <img class="mono" src="icons/kv.svg" alt="">
+    <div><div class="name">kvstore</div><div class="sub">Store · Persistent / Memory (测试)</div><div class="sub">key_values 表</div></div>
+  </div>
+  <div class="node infra" id="cache" style="left:2502px; top:1296px; width:360px; height:84px">
+    <img class="mono" src="icons/cache.svg" alt="">
+    <div><div class="name">cache</div><div class="sub">ICache[K,V] · ristretto v2</div><div class="sub">read-through · singleflight</div></div>
+  </div>
+  <div class="node infra" id="transaction" style="left:2910px; top:1296px; width:360px; height:84px">
+    <img class="mono" src="icons/audit.svg" alt="">
+    <div><div class="name">transaction</div><div class="sub">Transactor.Run · GormTransactor</div><div class="sub">tx 放进 ctx</div></div>
+  </div>
+  <div class="node infra" id="storage" style="left:3318px; top:1296px; width:360px; height:84px">
+    <img class="mono" src="icons/disk.svg" alt="">
+    <div><div class="name">storage.Manager</div><div class="sub">StorageSelector · local + S3</div><div class="sub">有状态单例 · 原子替换</div></div>
+  </div>
+  <div class="node infra" id="database" style="left:3726px; top:1296px; width:360px; height:84px">
+    <img class="mono" src="icons/sqlite.svg" alt="">
+    <div><div class="name">database</div><div class="sub">GORM + SQLite · 懒初始化</div><div class="sub">20 模型 AutoMigrate · 12 迁移器</div></div>
+  </div>
+
+  <!-- pkg/: the libraries, each under what uses it -->
+  <div class="zone frame" style="left:840px; top:1490px; width:3320px; height:200px; --c: var(--pkg)">
+    <span class="tag" data-card="pkg">pkg/ · 自研库<span class="sub">不 import internal/ · 可单独复用</span></span>
+  </div>
+  <div class="node pkg" id="gocap" style="left:870px; top:1536px; width:220px; height:100px">
+    <img class="mono" src="icons/captcha.svg" alt="">
+    <div><div class="name">gocap</div><div class="sub">PoW 验证码</div><div class="sub">仅标准库</div></div>
+  </div>
+  <div class="node pkg" id="viewer" style="left:1110px; top:1536px; width:290px; height:100px">
+    <img class="mono" src="icons/identity.svg" alt="">
+    <div><div class="name">viewer</div><div class="sub">请求身份上下文</div><div class="sub">仅标准库</div></div>
+  </div>
+  <div class="node pkg" id="busen" style="left:1512px; top:1536px; width:300px; height:100px">
+    <img class="mono" src="icons/bus.svg" alt="">
+    <div><div class="name">busen</div><div class="sub">类型安全事件总线</div><div class="sub">仅标准库</div></div>
+  </div>
+  <div class="node pkg" id="log" style="left:1860px; top:1536px; width:300px; height:100px">
+    <img class="mono" src="icons/logs.svg" alt="">
+    <div><div class="name">log</div><div class="sub">slog 日志管道</div><div class="sub">lumberjack · 内置 tint</div></div>
+  </div>
+  <div class="node pkg test" id="leakcheck" style="left:2200px; top:1536px; width:280px; height:100px">
+    <img class="mono" src="icons/leak.svg" alt="">
+    <div><div class="name">leakcheck</div><div class="sub">仅测试 · TestMain</div><div class="sub">goroutine 泄漏检查</div></div>
+  </div>
+  <div class="aside" style="left:2520px; top:1560px">busen · gocap · viewer · leakcheck 只依赖标准库</div>
+  <div class="aside" style="left:2520px; top:1584px">virefs 依赖 AWS SDK v2 · log 依赖 lumberjack</div>
+  <div class="aside" style="left:2520px; top:1608px">Go 1.27 泛型方法: busen 的 Bus.Publish[T]</div>
+  <div class="node pkg" id="virefs" style="left:3318px; top:1536px; width:360px; height:100px">
+    <img class="mono" src="icons/virefs.svg" alt="">
+    <div><div class="name">virefs</div><div class="sub">key 寻址的统一文件系统</div><div class="sub">LocalFS · ObjectFS · zip</div></div>
+  </div>
+
+  <!-- ======================================================================
+       Deep dives
+       ====================================================================== -->
+
+  <!-- ===== pkg/busen ===== -->
+  <div class="zone panel" style="left:40px; top:1920px; width:2260px; height:960px; --c: var(--pkg)">
+    <span class="tag" data-card="busen">pkg/busen · 一次发布经过什么<span class="sub">bus.go · publish.go · subscribe.go · router/ · dispatch/</span></span>
+  </div>
+  <div class="card" id="bs1" style="left:80px; top:1980px; width:396px; height:150px">
+    <b>1 · Publish[T](ctx, v, opts…)</b><code>gate.Enter · 已关闭 → ErrClosed</code><code>WithTopic · WithKey · WithHeaders</code><code>MetadataBuilder 合并 meta</code><code>触发 OnPublishStart</code>
+  </div>
+  <div class="card" id="bs2" style="left:524px; top:1980px; width:396px; height:150px">
+    <b>2 · 按 Go 类型路由</b><code>reflect.TypeFor[T]()</code><code>subs[type] 精确匹配 · 不看接口 / 父类型</code><code>copy-on-write 订阅快照</code><code>没有订阅者 → 直接返回 nil</code>
+  </div>
+  <div class="card" id="bs3" style="left:968px; top:1980px; width:396px; height:150px">
+    <b>3 · Topic 与过滤</b><code>router.Compile · 按 . 分段</code><code>* 匹配一段 · &gt; 匹配尾部多段</code><code>WithFilter 多个取 AND</code><code>无 topic 的订阅 = 该类型全收</code>
+  </div>
+  <div class="card" id="bs4" style="left:1412px; top:1980px; width:396px; height:150px">
+    <b>4 · 投递</b><code>同步 (默认): 发布者 goroutine 内联执行</code><code>异步: 按 key 选 mailbox 入队</code><code>Observer 逐个同步通知</code><code>各订阅者的错误 errors.Join</code>
+  </div>
+  <div class="card" id="bs5" style="left:1856px; top:1980px; width:396px; height:150px">
+    <b>5 · PublishDone</b><code>OnPublishDone{Matched, Delivered, Err}</code><code>同步订阅的错误回到 Publish</code><code>异步订阅的错误只经 hook</code><code>Ech0: 仅在出错时记日志</code>
+  </div>
+
+  <div class="box" id="bs-async" style="left:80px; top:2180px; width:1100px; height:380px">
+    <div class="head"><span class="name">异步订阅</span><span class="sub"><code>Async()</code> · 每个 worker 一个 mailbox (<code>chan</code>, 容量 = buffer) · 一个 goroutine</span></div>
+  </div>
+  <div class="lane" id="mb0" style="left:100px; top:2236px; width:700px; height:48px">
+    <b>mailbox 0</b><span class="recs"><i>C1</i><i class="hl">A3</i><i class="hl">A2</i><i class="hl">A1</i></span>
+  </div>
+  <div class="lane" id="mb1" style="left:100px; top:2304px; width:700px; height:48px">
+    <b>mailbox 1</b><span class="recs"><i>B2</i><i>D1</i><i>B1</i></span>
+  </div>
+  <div class="lane" id="mb2" style="left:100px; top:2372px; width:700px; height:48px">
+    <b>mailbox 2</b><span class="recs"><i>E1</i></span>
+  </div>
+  <div class="node flat" id="w0" style="left:860px; top:2240px; width:300px; height:40px">
+    <span class="name">worker 0</span><span class="sub">A1 → A2 → A3 · 一次一条</span>
+  </div>
+  <div class="node flat" id="w1" style="left:860px; top:2308px; width:300px; height:40px">
+    <span class="name">worker 1</span><span class="sub">与 worker 0 并行</span>
+  </div>
+  <div class="node flat" id="w2" style="left:860px; top:2376px; width:300px; height:40px">
+    <span class="name">worker 2</span><span class="sub">recover 兜住 panic</span>
+  </div>
+  <div class="aside" style="left:100px; top:2450px">有 key: FNV-1a 64(key) % n → 同一个 key 永远进同一个 mailbox → 同 key 有序</div>
+  <div class="aside" style="left:100px; top:2476px">无 key: round-robin · 只有 1 个 mailbox (Sequential) 时全局 FIFO</div>
+  <div class="aside" style="left:100px; top:2502px">Ech0: AsyncParallel = 2 workers × 128 · AsyncSequential = 1 worker × 64</div>
+  <div class="aside" style="left:100px; top:2528px">Ech0 的 Echo / User / Comment 事件以实体 ID 为 key，ResourceUploaded 以文件 key</div>
+
+  <div class="box" id="bs-over" style="left:1240px; top:2180px; width:1020px; height:380px; --name-w: 130px">
+    <div class="head"><span class="name">Overflow 策略</span><span class="sub">mailbox 满时 · <code>WithOverflow</code> / <code>WithDefaultOverflow</code></span></div>
+    <div class="list">
+      <div class="row"><span>Block · 默认</span><code>等空位或 ctx.Done → 返回 ctx.Err()</code></div>
+      <div class="row"><span>FailFast</span><code>立即 ErrBufferFull · OnEventRejected · rejected++</code></div>
+      <div class="row"><span>DropNewest</span><code>丢弃新事件 · ErrDropped · OnEventDropped</code></div>
+      <div class="row"><span>DropOldest</span><code>弹出最旧一条再入队 · ErrDropped</code></div>
+      <div class="row"><span>库默认</span><code>buffer 64 · parallelism 1 · Block · 非法选项让 New panic</code></div>
+      <div class="row"><span>Ech0 覆盖</span><code>ECH0_EVENT_DEFAULT_BUFFER 512 · ECH0_EVENT_DEFAULT_OVERFLOW block</code></div>
+      <div class="row"><span>Block 的代价</span><code>异步 mailbox 满时，发布者会阻塞在 Publish 上</code></div>
+      <div class="row"><span>可观测</span><code>Dropped / Rejected 事件带 QueueLen · QueueCap · MailboxIndex</code></div>
+    </div>
+  </div>
+
+  <div class="box" style="left:80px; top:2600px; width:700px; height:250px; --name-w: 90px">
+    <div class="head"><span class="name">中间件与 Handler</span></div>
+    <div class="list">
+      <div class="row"><span>Middleware</span><code>func(Next) Next · 先注册者在最外层</code></div>
+      <div class="row"><span>Use()</span><code>运行期追加 · middlewareVersion 触发懒重建</code></div>
+      <div class="row"><span>Panic</span><code>recover → HandlerPanicError · OnHandlerPanic</code></div>
+      <div class="row"><span>错误</span><code>同步: 返回给 Publish · 异步: 只经 hook</code></div>
+      <div class="row"><span>计数</span><code>processed · dropped · rejected · shutdownDrop</code></div>
+      <div class="row"><span>Ech0</span><code>未用 Use / Observer / topic 订阅</code></div>
+    </div>
+  </div>
+  <div class="box" style="left:820px; top:2600px; width:640px; height:250px; --name-w: 170px">
+    <div class="head"><span class="name">Hooks · 7 个</span><span class="sub">都经 safeCall 包裹</span></div>
+    <div class="list">
+      <div class="row"><span>OnPublishStart / Done</span><code>每次发布前后</code></div>
+      <div class="row"><span>OnHandlerError</span><code>订阅者返回 error</code></div>
+      <div class="row"><span>OnHandlerPanic</span><code>订阅者 panic</code></div>
+      <div class="row"><span>OnEventDropped</span><code>DropNewest / DropOldest</code></div>
+      <div class="row"><span>OnEventRejected</span><code>FailFast</code></div>
+      <div class="row"><span>OnHookPanic</span><code>hook 自身 panic · 多次 WithHooks 链式叠加</code></div>
+    </div>
+  </div>
+  <div class="box" style="left:1500px; top:2600px; width:760px; height:250px; --name-w: 100px">
+    <div class="head"><span class="name">关停</span><span class="sub"><code>Shutdown(ctx, mode)</code> → ShutdownResult</span></div>
+    <div class="list">
+      <div class="row"><span>Drain</span><code>关 gate · 等在途发布 · 排空 mailbox · 超时 ErrCloseIncomplete</code></div>
+      <div class="row"><span>BestEffort</span><code>超时的订阅者记进 TimedOutSubscribers，继续</code></div>
+      <div class="row"><span>Abort</span><code>清空 mailbox · 计入 shutdownDrop</code></div>
+      <div class="row"><span>Close(ctx)</span><code>= Shutdown(ctx, Drain)</code></div>
+      <div class="row"><span>Unsubscribe</span><code>关订阅 gate → 移除 → 等 idle → 关 mailbox</code></div>
+      <div class="row"><span>Ech0</span><code>生产环境不 Close bus · 由 Registrar 逆序退订</code></div>
+    </div>
+  </div>
+
+  <!-- ===== Event catalog ===== -->
+  <div class="zone panel" style="left:2380px; top:1920px; width:2240px; height:960px; --c: var(--bus)">
+    <span class="tag" data-card="events">internal/event · 事件目录<span class="sub">13 类事件 · 谁发布 · 谁订阅</span></span>
+  </div>
+  <div class="matrix" style="left:2420px; top:1976px; width:2160px">
+    <div class="h">事件 (Go 类型)</div><div class="h">EventName() · webhook 名</div><div class="h">OrderingKey</div><div class="h">生产者</div>
+    <div class="h c">webhook<small>同步</small></div><div class="h c">embedding<small>AsyncParallel</small></div><div class="h c">agent<small>AsyncParallel</small></div><div class="h c">snapshot<small>AsyncSequential</small></div>
+
+    <div class="ev">UserCreated</div><div>user.created</div><div>User.ID</div><div>service/user · InitOwner · Register</div><div class="m">●</div><div class="m"></div><div class="m"></div><div class="m"></div>
+    <div class="ev">UserUpdated</div><div>user.updated</div><div>User.ID</div><div>service/user · UpdateUser · UpdateUserAdmin</div><div class="m">●</div><div class="m"></div><div class="m"></div><div class="m"></div>
+    <div class="ev">UserDeleted</div><div>user.deleted</div><div>User.ID</div><div>service/user · DeleteUser</div><div class="m">●</div><div class="m"></div><div class="m">●</div><div class="m"></div>
+    <div class="ev">EchoCreated</div><div>echo.created</div><div>Echo.ID</div><div>service/echo · PostEcho</div><div class="m">●</div><div class="m">●</div><div class="m">●</div><div class="m"></div>
+    <div class="ev">EchoUpdated</div><div>echo.updated</div><div>Echo.ID</div><div>service/echo · UpdateEcho</div><div class="m">●</div><div class="m">●</div><div class="m">●</div><div class="m"></div>
+    <div class="ev">EchoDeleted</div><div>echo.deleted</div><div>Echo.ID</div><div>service/echo · DeleteEchoById (只带 ID + User)</div><div class="m">●</div><div class="m">●</div><div class="m"></div><div class="m"></div>
+    <div class="ev">CommentCreated</div><div>comment.created</div><div>Comment.ID</div><div>service/comment · 访客提交 · 集成评论</div><div class="m">●</div><div class="m"></div><div class="m"></div><div class="m"></div>
+    <div class="ev">CommentStatusUpdated</div><div>comment.status.updated</div><div>Comment.ID</div><div>service/comment · 审核通过 / 拒绝</div><div class="m">●</div><div class="m"></div><div class="m"></div><div class="m"></div>
+    <div class="ev">CommentDeleted</div><div>comment.deleted</div><div>Comment.ID</div><div>service/comment · 删除</div><div class="m">●</div><div class="m"></div><div class="m"></div><div class="m"></div>
+    <div class="ev">ResourceUploaded</div><div>resource.uploaded</div><div>文件 key</div><div>service/file · 上传 (用 Emit，错误记日志)</div><div class="m">●</div><div class="m"></div><div class="m"></div><div class="m"></div>
+    <div class="ev">SystemSnapshot</div><div>system.snapshot</div><div>—</div><div>job ExportRunner (手动) · task/scheduled Snapshot (定时)</div><div class="m">●</div><div class="m"></div><div class="m"></div><div class="m"></div>
+    <div class="ev">SystemExport</div><div>system.export</div><div>—</div><div>service/migrator · 同步下载导出</div><div class="m">●</div><div class="m"></div><div class="m"></div><div class="m"></div>
+    <div class="ev">UpdateSnapshotSchedule</div><div>system.snapshot_schedule.updated</div><div>—</div><div>service/setting · 更新快照计划</div><div class="m">●</div><div class="m"></div><div class="m"></div><div class="m">●</div>
+  </div>
+
+  <div class="box" style="left:2420px; top:2420px; width:700px; height:210px; --name-w: 130px">
+    <div class="head"><span class="name">订阅方式</span><span class="sub">internal/event/bus/options.go</span></div>
+    <div class="list">
+      <div class="row"><span>默认 · 无选项</span><code>同步 · 在发布者的 goroutine 里执行</code></div>
+      <div class="row"><span>AsyncParallel</span><code>2 workers · buffer 128 (ECH0_EVENT_AGENT_*)</code></div>
+      <div class="row"><span>AsyncSequential</span><code>1 worker · buffer 64 (ECH0_EVENT_SYSTEM_BUFFER)</code></div>
+      <div class="row"><span>Overflow</span><code>ECH0_EVENT_DEFAULT_OVERFLOW · 默认 block</code></div>
+      <div class="row"><span>webhook</span><code>同步订阅 · 池满时会阻塞发布者</code></div>
+    </div>
+  </div>
+  <div class="box" style="left:3160px; top:2420px; width:700px; height:210px; --name-w: 90px">
+    <div class="head"><span class="name">发布</span><span class="sub">internal/event/bus/emit.go</span></div>
+    <div class="list">
+      <div class="row"><span>Emit[T]</span><code>Keyed → WithKey(OrderingKey()) · 返回 error</code></div>
+      <div class="row"><span>Notify[T]</span><code>Emit + Warn 日志 · best-effort</code></div>
+      <div class="row"><span>Meta</span><code>MetadataBuilder → {source: ech0}</code></div>
+      <div class="row"><span>ctx</span><code>多数 service 传 context.Background()</code></div>
+      <div class="row"><span>无 facade</span><code>生产者直接调 eventbus.Notify(ctx, bus, evt)</code></div>
+    </div>
+  </div>
+  <div class="box" style="left:3900px; top:2420px; width:680px; height:210px; --name-w: 80px">
+    <div class="head"><span class="name">EventRegistrar</span><span class="sub">internal/event/bus/registrar.go</span></div>
+    <div class="list">
+      <div class="row"><span>Register</span><code>BeforeStart · 幂等 · 任一失败则逆序回滚</code></div>
+      <div class="row"><span>订阅者</span><code>AgentProcessor · EmbeddingProcessor · Dispatcher</code></div>
+      <div class="row"><span>Stop</span><code>AfterStop · 逆序退订 → Draining.Stop + Wait</code></div>
+      <div class="row"><span>例外</span><code>scheduled.Snapshot 在 Schedule 里自行订阅</code></div>
+      <div class="row"><span>Draining</span><code>只有 webhook.Dispatcher 实现</code></div>
+    </div>
+  </div>
+  <div class="box note" style="left:2420px; top:2670px; width:2160px; height:180px; --name-w: 150px">
+    <div class="head"><span class="name">依赖方向</span><span class="sub">依赖一律指向纯词汇包 internal/event</span></div>
+    <div class="list">
+      <div class="row"><span>internal/event</span><code>事件结构体 + EventName() / OrderingKey() + WebhookObservation · 只 import 领域 model</code></div>
+      <div class="row"><span>event/bus</span><code>基础设施: *busen.Bus 单例 · Emit / Notify / On / OnWithMeta · 订阅预设 · EventRegistrar</code></div>
+      <div class="row"><span>event/subscriber</span><code>AgentProcessor · EmbeddingProcessor · 依赖 bus 与 service</code></div>
+      <div class="row"><span>webhook</span><code>Dispatcher 也是订阅者 · 用 OnWithMeta 把事件桥接成 WebhookObservation{Topic, EventName, Payload, Metadata, OccurredAt}</code></div>
+    </div>
+  </div>
+
+  <!-- ===== Webhook delivery ===== -->
+  <div class="zone panel" style="left:40px; top:2960px; width:2260px; height:560px; --c: var(--hook)">
+    <span class="tag" data-card="webhook">internal/webhook · 出站投递<span class="sub">subscriber.go · dispatcher.go · sender.go · util/egress</span></span>
+  </div>
+  <div class="card" id="wh1" style="left:80px; top:3020px; width:380px; height:130px">
+    <b>1 · 同步订阅</b><code>OnWithMeta × 13 类事件</code><code>无选项 → 在发布者 goroutine 里</code><code>失败只记日志 · 总是返回 nil</code>
+  </div>
+  <div class="card" id="wh2" style="left:504px; top:3020px; width:380px; height:130px">
+    <b>2 · WebhookObservation</b><code>Topic = EventName() (点分)</code><code>EventName 字段 = Go 类型名</code><code>Payload = JSON · OccurredAt</code>
+  </div>
+  <div class="card" id="wh3" style="left:928px; top:3020px; width:380px; height:130px">
+    <b>3 · 选出目标</b><code>ListActiveWebhooks</code><code>WHERE is_active = true</code><code>每个 webhook 提交一个任务</code>
+  </div>
+  <div class="card" id="wh4" style="left:1352px; top:3020px; width:380px; height:130px">
+    <b>4 · Worker 池</b><code>util/async · 6 workers</code><code>队列 6 · 满了 Submit 就阻塞</code><code>→ 反压到发布事件的请求</code>
+  </div>
+  <div class="card" id="wh5" style="left:1776px; top:3020px; width:380px; height:130px">
+    <b>5 · Sender.Deliver</b><code>POST · 最多 3 次 · 500ms → 1s</code><code>只有 2xx 算成功</code><code>写回 last_status / last_trigger</code>
+  </div>
+  <div class="box" style="left:80px; top:3200px; width:700px; height:260px; --name-w: 140px">
+    <div class="head"><span class="name">请求</span></div>
+    <div class="list">
+      <div class="row"><span>Content-Type</span><code>application/json</code></div>
+      <div class="row"><span>User-Agent</span><code>Ech0-Webhook-Client</code></div>
+      <div class="row"><span>X-Ech0-Event</span><code>&lt;topic&gt;</code></div>
+      <div class="row"><span>X-Ech0-Event-ID</span><code>&lt;unix 纳秒&gt;</code></div>
+      <div class="row"><span>X-Ech0-Timestamp</span><code>&lt;unix 秒&gt;</code></div>
+      <div class="row"><span>X-Ech0-Signature</span><code>sha256=HMAC-SHA256(secret, body) · 设了 secret 才发</code></div>
+      <div class="row"><span>Body</span><code>topic · event_name · payload_raw · metadata · occurred_at</code></div>
+    </div>
+  </div>
+  <div class="box" id="wh-egress" style="left:820px; top:3200px; width:700px; height:260px; --name-w: 90px">
+    <div class="head"><span class="name">egress 守卫</span><span class="sub">util/egress · 防 SSRF</span></div>
+    <div class="list">
+      <div class="row"><span>Validate</span><code>只允许 http / https · 拒绝 userinfo</code></div>
+      <div class="row"><span>主机名</span><code>拒 localhost · *.localhost · host / gateway.docker.internal</code></div>
+      <div class="row"><span>拨号</span><code>secureDialContext 复核真实的远端 IP</code></div>
+      <div class="row"><span>网段</span><code>RFC1918 · loopback · link-local · CGNAT · 组播 · ULA</code></div>
+      <div class="row"><span>重定向</span><code>最多 3 次 · 每一跳重新校验</code></div>
+      <div class="row"><span>TLS</span><code>≥ 1.2 · 客户端超时 5s</code></div>
+    </div>
+  </div>
+  <div class="box" style="left:1560px; top:3200px; width:700px; height:260px; --name-w: 60px">
+    <div class="head"><span class="name">存储 · 测试 · 关停</span></div>
+    <div class="list">
+      <div class="row"><span>存储</span><code>webhooks 表 (uuidv7) · Secret 不输出到 JSON</code></div>
+      <div class="row"><span>记录</span><code>只保留 last_status / last_trigger · 没有投递日志表</code></div>
+      <div class="row"><span>测试</span><code>TestWebhook: admin → Validate → SendTest (2 次 · 300ms)</code></div>
+      <div class="row"><span>管理</span><code>设置页 · MCP webhook 工具 (admin:settings)</code></div>
+      <div class="row"><span>关停</span><code>实现 Draining · AfterStop 时 Stop + Wait 排空池</code></div>
+      <div class="row"><span>配置</span><code>ECH0_EVENT_WEBHOOK_POOL_WORKERS / _QUEUE · 默认 6 / 6</code></div>
+    </div>
+  </div>
+
+  <!-- ===== pkg/virefs ===== -->
+  <div class="zone panel" style="left:2380px; top:2960px; width:2240px; height:560px; --c: var(--pkg)">
+    <span class="tag" data-card="virefs">pkg/virefs · key 寻址的统一文件系统<span class="sub">fs.go · localfs.go · objectfs.go · schema.go · plugin/zip</span></span>
+  </div>
+  <div class="box" id="vf-fs" style="left:2420px; top:3020px; width:560px; height:260px; --name-w: 100px">
+    <div class="head"><span class="name">FS 接口</span><span class="sub">7 个方法 + 可选能力</span></div>
+    <div class="list">
+      <div class="row"><span>读</span><code>Get · Stat · Exists · List</code></div>
+      <div class="row"><span>写</span><code>Put(ContentType, Metadata) · Delete</code></div>
+      <div class="row"><span>Access</span><code>本地路径或可访问的 URL</code></div>
+      <div class="row"><span>Key</span><code>CleanKey: 去首尾 / · path.Clean · 拒绝 ..</code></div>
+      <div class="row"><span>Copier</span><code>LocalFS · ObjectFS · MountTable</code></div>
+      <div class="row"><span>BatchDeleter</span><code>ObjectFS · 每批 1000</code></div>
+      <div class="row"><span>Presigner</span><code>ObjectFS · PresignGet / PresignPut</code></div>
+    </div>
+  </div>
+  <div class="box" id="vf-tools" style="left:2420px; top:3300px; width:560px; height:200px; --name-w: 110px">
+    <div class="head"><span class="name">组合与工具</span></div>
+    <div class="list">
+      <div class="row"><span>MountTable</span><code>按单段前缀挂载多个 FS</code></div>
+      <div class="row"><span>Hooks · Chain</span><code>包装 FS 的中间件</code></div>
+      <div class="row"><span>Walk</span><code>基于 List 递归 · ErrSkipDir</code></div>
+      <div class="row"><span>Migrate</span><code>跨 FS 复制 · Error / Skip / Overwrite</code></div>
+      <div class="row"><span>Ech0</span><code>只用到 Walk，其余暂未使用</code></div>
+    </div>
+  </div>
+  <div class="box" id="vf-local" style="left:3040px; top:3020px; width:640px; height:200px; --name-w: 60px">
+    <div class="head"><span class="name">LocalFS</span><span class="sub">本地磁盘</span></div>
+    <div class="list">
+      <div class="row"><span>路径</span><code>root 绝对化 · keyFunc · 越界检查</code></div>
+      <div class="row"><span>写入</span><code>WithAtomicWrite: .virefs-tmp-* → rename</code></div>
+      <div class="row"><span>List</span><code>非递归 · os.ReadDir</code></div>
+      <div class="row"><span>忽略</span><code>Put 的 ContentType / Metadata</code></div>
+      <div class="row"><span>错误</span><code>mapOSError → OpError{Op, Key, Err}</code></div>
+    </div>
+  </div>
+  <div class="box" id="vf-object" style="left:3040px; top:3250px; width:640px; height:200px; --name-w: 90px">
+    <div class="head"><span class="name">ObjectFS</span><span class="sub">S3 · aws-sdk-go-v2</span></div>
+    <div class="list">
+      <div class="row"><span>Key</span><code>prefix + keyFunc(CleanKey(key))</code></div>
+      <div class="row"><span>List</span><code>ListObjectsV2 · CommonPrefixes → 目录</code></div>
+      <div class="row"><span>Access</span><code>accessFunc → presign 15m → baseURL</code></div>
+      <div class="row"><span>Provider</span><code>AWS us-east-1 · MinIO path-style · R2 auto</code></div>
+      <div class="row"><span>原生</span><code>CopyObject · DeleteObjects · HeadObject</code></div>
+    </div>
+  </div>
+  <div class="box" id="vf-storage" style="left:3740px; top:3020px; width:840px; height:230px; --name-w: 80px">
+    <div class="head"><span class="name">Ech0 · internal/storage</span></div>
+    <div class="list">
+      <div class="row"><span>Schema</span><code>按扩展名 → images/ · audios/ · videos/ · documents/ · 其余 files/</code></div>
+      <div class="row"><span>Local</span><code>data/files · atomic 写 · URL /api/files/&lt;path&gt;</code></div>
+      <div class="row"><span>S3</span><code>NewObjectFSFromConfig · WithPrefix · CDN / path-style / 虚拟主机 URL</code></div>
+      <div class="row"><span>Selector</span><code>local 常驻 · object 可选 · 按 StorageType 选</code></div>
+      <div class="row"><span>Manager</span><code>ReloadFromConfigAndDB · ApplyS3Setting · 原子替换 selector</code></div>
+      <div class="row"><span>Key</span><code>&lt;uid8&gt;_&lt;unix&gt;_&lt;hex8&gt;&lt;ext&gt; · 小写</code></div>
+    </div>
+  </div>
+  <div class="box" id="vf-zip" style="left:3740px; top:3290px; width:840px; height:170px; --name-w: 100px">
+    <div class="head"><span class="name">plugin/zip</span><span class="sub">快照与 capsule</span></div>
+    <div class="list">
+      <div class="row"><span>FS</span><code>只读 · 内存索引 · Put / Delete / Access → ErrNotSupported</code></div>
+      <div class="row"><span>Pack · Unpack</span><code>把一组 key 按 Deflate 打包 · 解包到任意 FS</code></div>
+      <div class="row"><span>snapshot</span><code>Walk data/ → Pack · 数据库用 VACUUM INTO 的副本覆盖</code></div>
+      <div class="row"><span>capsule</span><code>export 先暂存到 LocalFS 再 Pack · load 读目录或 zip</code></div>
+    </div>
+  </div>
+
+  <!-- ===== pkg/gocap ===== -->
+  <div class="zone panel" style="left:40px; top:3600px; width:2260px; height:560px; --c: var(--pkg)">
+    <span class="tag" data-card="gocap">pkg/gocap · 内嵌 PoW 验证码<span class="sub">cap/ → core/ → store/ · transport/http</span></span>
+  </div>
+  <div class="card" id="gc1" style="left:80px; top:3660px; width:510px; height:150px">
+    <b>1 · challenge (浏览器)</b><code>POST /api/cap/{site}/challenge</code><code>限流 30 次 / 5s / IP</code><code>HS256 JWT {sk, n, c, s, d, exp, iat}</code><code>c = 80 · s = 32 · d = 4 · TTL 15m</code>
+  </div>
+  <div class="card" id="gc2" style="left:630px; top:3660px; width:510px; height:150px">
+    <b>2 · 求解 PoW (浏览器)</b><code>种子 = 整个 challenge token</code><code>salt_i = PRNG(token + i, s)</code><code>target_i = PRNG(token + i + "d", d)</code><code>找 n: sha256(salt_i + n) 以 target_i 开头</code>
+  </div>
+  <div class="card" id="gc3" style="left:1180px; top:3660px; width:510px; height:150px">
+    <b>3 · redeem</b><code>验签 → sk → 过期 → 参数边界</code><code>VerifySolutions · 解的个数 = c</code><code>TryMarkChallengeSigUsed 防重放</code><code>发 redeem token · TTL 2h</code>
+  </div>
+  <div class="card" id="gc4" style="left:1730px; top:3660px; width:510px; height:150px">
+    <b>4 · siteverify (Ech0 后端)</b><code>评论提交时 SiteVerify(token)</code><code>secret 常量时间比较</code><code>ConsumeRedeemToken 读即删</code><code>→ 每个 token 只能用一次</code>
+  </div>
+  <div class="box" id="gc-store" style="left:80px; top:3860px; width:700px; height:210px; --name-w: 140px">
+    <div class="head"><span class="name">store · memstore</span><span class="sub">唯一实现 · 一把 RWMutex</span></div>
+    <div class="list">
+      <div class="row"><span>sites</span><code>SiteKey → SecretHash · JWTSecret · c / s / d</code></div>
+      <div class="row"><span>usedChallengeSig</span><code>sha256(token) → 过期时间</code></div>
+      <div class="row"><span>redeemTokens</span><code>siteKey:token → 过期时间</code></div>
+      <div class="row"><span>rateWindows</span><code>固定窗口 scope:key:window:bucket</code></div>
+      <div class="row"><span>GC</span><code>每 2s 清理过期 · 读取时也惰性清理</code></div>
+    </div>
+  </div>
+  <div class="box" style="left:820px; top:3860px; width:700px; height:210px; --name-w: 60px">
+    <div class="head"><span class="name">transport/http</span><span class="sub">只做协议转换</span></div>
+    <div class="list">
+      <div class="row"><span>路由</span><code>POST /{site}/{challenge | redeem | siteverify} · 其余 405</code></div>
+      <div class="row"><span>CORS</span><code>Ech0 开启 · OPTIONS → 204</code></div>
+      <div class="row"><span>解码</span><code>redeem 宽松 · siteverify 严格 · 上限 1 MiB</code></div>
+      <div class="row"><span>错误</span><code>{success: false, code, error} · 400 / 403 / 404 / 429</code></div>
+      <div class="row"><span>限流</span><code>challenge 总是限流 · 键 site:IP</code></div>
+    </div>
+  </div>
+  <div class="box" id="gc-ech0" style="left:1560px; top:3860px; width:700px; height:240px; --name-w: 60px">
+    <div class="head"><span class="name">Ech0 · internal/captcha</span></div>
+    <div class="list">
+      <div class="row"><span>引擎</span><code>sync.OnceValues 单例 · 不经 Wire</code></div>
+      <div class="row"><span>站点</span><code>ech0-comment · secret 缺省 = sha256(JWT secret)</code></div>
+      <div class="row"><span>挂载</span><code>/api/cap/*any → NewHTTPHandler("/api")</code></div>
+      <div class="row"><span>调用</span><code>评论表单带 endpoint · 提交时 SiteVerify</code></div>
+      <div class="row"><span>开关</span><code>评论设置 CaptchaEnabled · 默认关闭</code></div>
+      <div class="row"><span>配置</span><code>ECH0_COMMENT_CAPTCHA_* · redeem / verify 也限流</code></div>
+    </div>
+  </div>
+
+  <!-- ===== pkg/log ===== -->
+  <div class="zone panel" style="left:2380px; top:3600px; width:2240px; height:560px; --c: var(--pkg)">
+    <span class="tag" data-card="log">pkg/log · slog 日志管道<span class="sub">log.go · handler.go · tint/ (vendored)</span></span>
+  </div>
+  <div class="node" id="lg-api" style="left:2420px; top:3670px; width:330px; height:84px">
+    <img class="mono" src="icons/logs.svg" alt="">
+    <div><div class="name">logUtil.Info / Warn / Error</div><div class="sub">slog.Attr · 带 module 字段</div><div class="sub">Panic / Fatal 附 stacktrace</div></div>
+  </div>
+  <div class="node" id="lg-fan" style="left:2800px; top:3670px; width:260px; height:84px">
+    <div><div class="name">fanoutHandler</div><div class="sub">全局 slog.LevelVar</div><div class="sub">Panic = Error+4 · Fatal = +8</div></div>
+  </div>
+  <div class="node" id="lg-con" style="left:3110px; top:3640px; width:380px; height:64px">
+    <div><div class="name">Console handler</div><div class="sub">json: JSONHandler · console: tint 彩色</div></div>
+  </div>
+  <div class="node" id="lg-ring" style="left:3110px; top:3740px; width:380px; height:64px">
+    <div><div class="name">ringHandler</div><div class="sub">recordToEntry → LogEntry</div></div>
+  </div>
+  <div class="node" id="lg-hub" style="left:3540px; top:3730px; width:380px; height:84px">
+    <div><div class="name">LogStreamHub</div><div class="sub">最近 2000 条环形缓冲 · 订阅者 map</div><div class="sub">满了 drop_oldest · dropped 计数</div></div>
+  </div>
+  <div class="node" id="lg-ws" style="left:4000px; top:3640px; width:580px; height:56px">
+    <div><div class="name">WebSocket · <code>/ws/system/logs</code></div><div class="sub">SubscribeLogs(256)</div></div>
+  </div>
+  <div class="node" id="lg-sse" style="left:4000px; top:3710px; width:580px; height:56px">
+    <div><div class="name">SSE · <code>/api/system/logs/stream</code></div><div class="sub">SubscribeLogs(512) · 15s keep-alive · admin:settings</div></div>
+  </div>
+  <div class="node" id="lg-file" style="left:4000px; top:3780px; width:580px; height:56px">
+    <div><div class="name">文件 sink</div><div class="sub">满 128 条或每 500ms 批量写 → lumberjack</div></div>
+  </div>
+  <div class="node" id="lg-applog" style="left:4000px; top:3880px; width:580px; height:56px">
+    <img class="mono" src="icons/logs.svg" alt="">
+    <div><div class="name">data/app.log</div><div class="sub">紧凑 JSON 行 · 100 MB × 5 份 · 30 天 · gzip</div></div>
+  </div>
+  <div class="node" id="lg-tail" style="left:4000px; top:3980px; width:580px; height:56px">
+    <div><div class="name">GET <code>/api/system/logs</code></div><div class="sub">QueryLogFileTail · 默认 200 · 最多 5000 · 级别 / 关键字</div></div>
+  </div>
+  <div class="box" style="left:2420px; top:3860px; width:1100px; height:210px; --name-w: 90px">
+    <div class="head"><span class="name">LogConfig · 默认值</span><span class="sub">bootstrap 按 config.Log 初始化</span></div>
+    <div class="list">
+      <div class="row"><span>级别 · 格式</span><code>info · json · debug 模式强制 console 格式 + 彩色</code></div>
+      <div class="row"><span>文件</span><code>data/app.log · 100 MB · 5 份 · 30 天 · 压缩</code></div>
+      <div class="row"><span>流</span><code>buffer 2048 · recent 2000 · drop_oldest · flush 128 条 / 500ms</code></div>
+      <div class="row"><span>注意</span><code>文件 sink 也是 hub 订阅者 · 高负载时文件里同样可能丢行</code></div>
+      <div class="row"><span>注意</span><code>LogConfig.Console 没有被读取 · 控制台 handler 恒开</code></div>
+    </div>
+  </div>
+
+  <!-- ===== kvstore · setting · cache · transaction ===== -->
+  <div class="zone panel" style="left:40px; top:4240px; width:1460px; height:900px; --c: var(--infra)">
+    <span class="tag" data-card="kv">kvstore · setting · cache · transaction</span>
+  </div>
+  <div class="box" id="kv-spec" style="left:80px; top:4300px; width:620px; height:230px; --name-w: 90px">
+    <div class="head"><span class="name">setting.Spec[T]</span><span class="sub">internal/setting</span></div>
+    <div class="list">
+      <div class="row"><span>Key</span><code>KV 中的键名</code></div>
+      <div class="row"><span>Default</span><code>func() T</code></div>
+      <div class="row"><span>Normalize</span><code>func(*T) · 读和写都会跑</code></div>
+      <div class="row"><span>Migrate</span><code>旧数据迁移 (Passkey 从 oauth2_setting 拆出)</code></div>
+      <div class="row"><span>Get</span><code>缺键 → Default · 解析失败 → Default + err</code></div>
+      <div class="row"><span>Seed</span><code>BeforeStart 按注册顺序 · 只在缺键时写入</code></div>
+    </div>
+  </div>
+  <div class="node" id="kv-kv" style="left:780px; top:4300px; width:320px; height:84px">
+    <img class="mono" src="icons/kv.svg" alt="">
+    <div><div class="name">kvstore.Store</div><div class="sub">Get · Set · Delete · ErrNotFound</div><div class="sub">Persistent (生产) · Memory (测试)</div></div>
+  </div>
+  <div class="node" id="kv-repo" style="left:780px; top:4430px; width:320px; height:84px">
+    <div><div class="name">KeyValueRepository</div><div class="sub">ReadThroughTypedUnlessTx</div><div class="sub">写: 先失效再回填</div></div>
+  </div>
+  <div class="node" id="kv-cache" style="left:1160px; top:4430px; width:300px; height:84px">
+    <img class="mono" src="icons/cache.svg" alt="">
+    <div><div class="name">ristretto</div><div class="sub">maxCost 1M · counters 1M</div><div class="sub">singleflight 合并回源</div></div>
+  </div>
+  <div class="node" id="kv-db" style="left:780px; top:4560px; width:320px; height:64px">
+    <img class="mono" src="icons/sqlite.svg" alt="">
+    <div><div class="name">key_values 表</div><div class="sub">SQLite · Key 主键 · Value 文本</div></div>
+  </div>
+  <div class="box" style="left:80px; top:4670px; width:1380px; height:200px; --name-w: 80px">
+    <div class="head"><span class="name">durableKV 里的键</span><span class="sub">字段名一律叫 durableKV</span></div>
+    <div class="list">
+      <div class="row"><span>设置</span><code>system_settings · s3_setting · oauth2_setting · passkey_setting · agent_setting · embedding_setting</code></div>
+      <div class="row"><span>设置</span><code>snapshot_schedule · comment_system_setting · server_url</code></div>
+      <div class="row"><span>状态</span><code>embedding_index_state · migration_global_job_state · install_initialized · release_version</code></div>
+      <div class="row"><span>Copilot</span><code>chat_session:&lt;uid&gt; · gen_recent (AI 近期总结缓存，由 AgentProcessor 删除)</code></div>
+      <div class="row"><span>迁移标记</span><code>storage_time_*_v1 · 各 migrator 的完成标记</code></div>
+    </div>
+  </div>
+  <div class="box" style="left:80px; top:4900px; width:1380px; height:200px; --name-w: 90px">
+    <div class="head"><span class="name">transaction · cache 的其他用途</span></div>
+    <div class="list">
+      <div class="row"><span>Transactor</span><code>GormTransactor.Run → db.Transaction · 把 tx 放进 ctx</code></div>
+      <div class="row"><span>repository</span><code>getDB(ctx) 优先取 ctx 里的 tx</code></div>
+      <div class="row"><span>缓存旁路</span><code>事务内的读取绕过缓存 (…UnlessTx)</code></div>
+      <div class="row"><span>TTL 缓存</span><code>JWT 黑名单 (jti，剩余有效期) · OAuth code · 今日 echo (到用户当天结束)</code></div>
+      <div class="row"><span>read-through</span><code>user · echo 分页 · KeyValue</code></div>
+    </div>
+  </div>
+
+  <!-- ===== visitor ===== -->
+  <div class="zone panel" style="left:1580px; top:4240px; width:1460px; height:900px; --c: var(--infra)">
+    <span class="tag" data-card="visitor">internal/visitor · actor 模型</span>
+  </div>
+  <div class="node" id="v-web" style="left:1620px; top:4310px; width:300px; height:72px">
+    <img class="mono" src="icons/console.svg" alt="">
+    <div><div class="name">web handler</div><div class="sub">GET index.html (SPA)</div></div>
+  </div>
+  <div class="node" id="v-rec" style="left:1980px; top:4310px; width:300px; height:72px">
+    <div><div class="name">Record(r, ip)</div><div class="sub">只记 GET · 非阻塞发送</div></div>
+  </div>
+  <div class="node" id="v-ch" style="left:2340px; top:4310px; width:300px; height:72px">
+    <div><div class="name">recordCh</div><div class="sub">缓冲 4096 · 满了直接丢</div></div>
+  </div>
+  <div class="box" id="v-actor" style="left:1980px; top:4450px; width:1020px; height:200px; --name-w: 80px">
+    <div class="head"><span class="name">run()</span><span class="sub">唯一持有状态的 goroutine</span></div>
+    <div class="list">
+      <div class="row"><span>byDay</span><code>日期 → {PV, UV} · 保留 7 天</code></div>
+      <div class="row"><span>todayUV</span><code>FNV-64a(IP) 集合 · UTC 换日时清空</code></div>
+      <div class="row"><span>lastPVAt</span><code>同一 IP 5 分钟内只记 1 次 PV · 24h 后清理</code></div>
+      <div class="row"><span>查询</span><code>queryCh · todayCh · loadCh · 无缓冲的请求-应答</code></div>
+      <div class="row"><span>生命周期</span><code>NewTracker 时启动 · 没有 Stop · 不是 Component</code></div>
+    </div>
+  </div>
+  <div class="node" id="v-dash" style="left:1620px; top:4450px; width:300px; height:72px">
+    <div><div class="name">dashboard</div><div class="sub">Last7Days → 7 日热力</div></div>
+  </div>
+  <div class="node" id="v-task" style="left:1620px; top:4570px; width:300px; height:84px">
+    <img class="mono" src="icons/task.svg" alt="">
+    <div><div class="name">VisitorSnapshot</div><div class="sub">启动时 LoadHistory(7 天)</div><div class="sub">每 60 分钟 flush · OnStop 再 flush</div></div>
+  </div>
+  <div class="node" id="v-db" style="left:1620px; top:4730px; width:300px; height:64px">
+    <img class="mono" src="icons/sqlite.svg" alt="">
+    <div><div class="name">daily_stats 表</div><div class="sub">Date 主键 · PV · UV</div></div>
+  </div>
+  <div class="aside" style="left:1980px; top:4700px">所有日期按 UTC</div>
+  <div class="aside" style="left:1980px; top:4724px">重启后 todayUV 从空集合开始：当天已记过的 IP 会再计一次 UV</div>
+  <div class="aside" style="left:1980px; top:4748px">IP 只存 FNV-64a 哈希</div>
+
+  <!-- ===== job · task ===== -->
+  <div class="zone panel" style="left:3120px; top:4240px; width:1500px; height:900px; --c: var(--infra)">
+    <span class="tag" data-card="jobtask">internal/job · internal/task</span>
+  </div>
+  <div class="node" id="j-sub" style="left:3160px; top:4310px; width:440px; height:84px">
+    <img class="mono" src="icons/job.svg" alt="">
+    <div><div class="name">Submit(type, payload)</div><div class="sub">没有 Runner → ErrNoRunner</div><div class="sub">同类型未结束 → ErrAlreadyRunning</div></div>
+  </div>
+  <div class="node" id="j-run" style="left:3630px; top:4310px; width:440px; height:84px">
+    <div><div class="name">go run()</div><div class="sub">running → Runner.Run(ctx, payload, report)</div><div class="sub">report 写进内存 live 进度</div></div>
+  </div>
+  <div class="node" id="j-end" style="left:4100px; top:4310px; width:480px; height:84px">
+    <div><div class="name">终态落库</div><div class="sub">success (结果写入 Payload) · failed</div><div class="sub">cancelled (ctx 被取消)</div></div>
+  </div>
+  <div class="box" style="left:3160px; top:4440px; width:1420px; height:230px; --name-w: 100px">
+    <div class="head"><span class="name">jobs 表 · Runner</span><span class="sub">internal/job · job/runner</span></div>
+    <div class="list">
+      <div class="row"><span>表</span><code>jobs · Type 为主键 → 每类型一行 · 同类型同一时刻只跑一个 · 无全局并发池</code></div>
+      <div class="row"><span>reindex</span><code>embeddingService.Backfill · phase indexing</code></div>
+      <div class="row"><span>migration</span><code>ech0 / memos → ImportEngine · capsule → CapsuleEngine</code></div>
+      <div class="row"><span>export</span><code>snapshot → ExportEngine + SystemSnapshot · capsule → CapsuleEngine</code></div>
+      <div class="row"><span>Start / Stop</span><code>启动时 SweepRunning("interrupted by restart") · 停止时取消 ctx，不等待</code></div>
+      <div class="row"><span>Get</span><code>DB 行 + 内存里的 phase / snapshot 叠加</code></div>
+    </div>
+  </div>
+  <div class="box" style="left:3160px; top:4700px; width:1420px; height:200px; --name-w: 150px">
+    <div class="head"><span class="name">task.Manager</span><span class="sub">gocron v2 · UTC · Task.Schedule + 可选 StopHook</span></div>
+    <div class="list">
+      <div class="row"><span>cleanup-temp-files</span><code>每 72h · fileService.CleanupOrphanFiles</code></div>
+      <div class="row"><span>snapshot</span><code>cron 5 段 / 6 段 (含秒) · 默认 0 2 * * 0 且关闭 · SingletonMode Reschedule</code></div>
+      <div class="row"><span>snapshot</span><code>ExportEngine.Export → SystemSnapshot · 订阅 UpdateSnapshotSchedule 重载</code></div>
+      <div class="row"><span>visitor-snapshot</span><code>每 60 分钟 · 启动时 LoadHistory · OnStop 时 flush</code></div>
+      <div class="row"><span>Stop</span><code>先调各 StopHook.OnStop，再 scheduler.Shutdown</code></div>
+    </div>
+  </div>
+
+  <!-- ===== Lifecycle ===== -->
+  <div class="zone panel" style="left:40px; top:5220px; width:3000px; height:520px; --c: var(--ink)">
+    <span class="tag" data-card="lifecycle" style="color: var(--bg)">进程生命周期 · app.App</span>
+  </div>
+  <div class="node flat" id="lc-main" style="left:80px; top:5280px; width:220px; height:48px">
+    <span class="name">cmd/ech0 main</span>
+  </div>
+  <div class="node flat" id="lc-boot" style="left:360px; top:5280px; width:300px; height:48px">
+    <span class="name">bootstrap</span><span class="sub">config · 日志 · host 环境</span>
+  </div>
+  <div class="node flat" id="lc-cobra" style="left:720px; top:5280px; width:260px; height:48px">
+    <span class="name">Cobra</span><span class="sub"><code>serve</code></span>
+  </div>
+  <div class="node flat" id="lc-wire" style="left:1040px; top:5280px; width:300px; height:48px">
+    <span class="name">di.BuildApp</span><span class="sub">Wire 装配</span>
+  </div>
+  <div class="node flat" id="lc-run" style="left:1400px; top:5280px; width:260px; height:48px">
+    <span class="name">app.Run()</span><span class="sub">见下方时间线</span>
+  </div>
+  <div class="aside" style="left:1720px; top:5290px">其他动词不启动 HTTP: tui · version · hello · export / import (capsule | snapshot) · check · build</div>
+
+  <div class="tl-guide key" style="left:360px;  top:5372px; height:300px"></div>
+  <div class="tl-guide"     style="left:760px;  top:5372px; height:300px"></div>
+  <div class="tl-guide key" style="left:1180px; top:5372px; height:300px"></div>
+  <div class="tl-guide key" style="left:2080px; top:5372px; height:300px"></div>
+  <div class="tl-guide"     style="left:2640px; top:5372px; height:300px"></div>
+  <div class="tl-tick" style="left:366px;  top:5360px"><b>BeforeStart</b></div>
+  <div class="tl-tick" style="left:766px;  top:5360px">Start · 顺序</div>
+  <div class="tl-tick" style="left:1186px; top:5360px"><b>Run · 等待信号</b></div>
+  <div class="tl-tick" style="left:2086px; top:5360px"><b>SIGTERM / SIGINT · Stop 逆序</b></div>
+  <div class="tl-tick" style="left:2646px; top:5360px">AfterStop</div>
+
+  <div class="tl-lane" style="left:80px; top:5390px">setting</div>
+  <div class="tl-bar fill" style="left:360px; top:5390px; width:200px">Seed · 幂等播种</div>
+
+  <div class="tl-lane" style="left:80px; top:5430px">EventRegistrar</div>
+  <div class="tl-bar" style="left:560px; top:5430px; width:200px">Register</div>
+  <div class="tl-bar soft" style="left:760px; top:5430px; width:1880px">订阅生效 · 事件流转</div>
+  <div class="tl-bar" style="left:2640px; top:5430px; width:360px">Stop · 逆序退订 → 排空 webhook 池</div>
+
+  <div class="tl-lane" style="left:80px; top:5470px">job.Manager</div>
+  <div class="tl-bar" style="left:760px; top:5470px; width:140px">Start · sweep</div>
+  <div class="tl-bar soft" style="left:900px; top:5470px; width:1580px">接受 Submit · 每个 job 一个 goroutine</div>
+  <div class="tl-bar" style="left:2480px; top:5470px; width:160px">Stop · cancel</div>
+
+  <div class="tl-lane" style="left:80px; top:5510px">task.Manager</div>
+  <div class="tl-bar" style="left:900px; top:5510px; width:140px">Schedule</div>
+  <div class="tl-bar soft" style="left:1040px; top:5510px; width:1240px">gocron 运行 · 快照订阅生效</div>
+  <div class="tl-bar" style="left:2280px; top:5510px; width:200px">OnStop · Shutdown</div>
+
+  <div class="tl-lane" style="left:80px; top:5550px">server</div>
+  <div class="tl-bar" style="left:1040px; top:5550px; width:140px">Listen :6277</div>
+  <div class="tl-bar soft" style="left:1180px; top:5550px; width:900px">处理请求</div>
+  <div class="tl-bar" style="left:2080px; top:5550px; width:200px">Shutdown</div>
+
+  <div class="tl-lane" style="left:80px; top:5590px">stop 预算</div>
+  <div class="tl-bar fill" style="left:2080px; top:5590px; width:920px">stopTimeout 5s · 所有 Stop 与 AfterStop 共用一个 ctx</div>
+
+  <div class="aside" style="left:80px; top:5650px">任一 Component 启动失败时，已启动的按逆序 Stop</div>
+  <div class="aside" style="left:80px; top:5674px">visitor · cache · storage · captcha 不是 Component：没有托管的启停，visitor 的 goroutine 与 ristretto 不会关闭</div>
+  <div class="aside" style="left:80px; top:5698px">job 的 Stop 只取消 ctx，不等 goroutine 退出</div>
+
+  <!-- ===== pkg/viewer · pkg/leakcheck ===== -->
+  <div class="zone panel" style="left:3120px; top:5220px; width:1500px; height:520px; --c: var(--pkg)">
+    <span class="tag" data-card="viewer">pkg/viewer · pkg/leakcheck</span>
+  </div>
+  <div class="node" id="vw-mw" style="left:3160px; top:5280px; width:400px; height:72px">
+    <img class="mono" src="icons/authz.svg" alt="">
+    <div><div class="name">RequireAuth / OptionalAuth</div><div class="sub">JWT → 撤销检查 → NewUserViewerWithToken</div></div>
+  </div>
+  <div class="node" id="vw-ctx" style="left:3610px; top:5280px; width:420px; height:72px">
+    <img class="mono" src="icons/identity.svg" alt="">
+    <div><div class="name">viewer.Context</div><div class="sub">UserID · TokenType · Scopes · Audience · TokenID</div></div>
+  </div>
+  <div class="node" id="vw-use" style="left:4080px; top:5280px; width:500px; height:72px">
+    <div><div class="name">MustFromContext · ~70 处</div><div class="sub">service · MCP dispatch · scope 中间件 · 缺失回退 Noop</div></div>
+  </div>
+  <div class="box" style="left:3160px; top:5390px; width:1420px; height:175px; --name-w: 120px">
+    <div class="head"><span class="name">scope 判定</span><span class="sub">internal/middleware/scope.go</span></div>
+    <div class="list">
+      <div class="row"><span>session token</span><code>跳过 scope / audience 检查</code></div>
+      <div class="row"><span>access token</span><code>audience 必须匹配 · 需要具备全部 scope · admin 级 token 不能走 ?token</code></div>
+      <div class="row"><span>audience</span><code>public-client · cli · integration · mcp-remote</code></div>
+      <div class="row"><span>系统身份</span><code>NewSystemViewer 就是 Noop · 后台任务用 (如 copilot 摘要)</code></div>
+    </div>
+  </div>
+  <div class="box note" style="left:3160px; top:5594px; width:1420px; height:116px; --name-w: 120px">
+    <div class="head"><span class="name">pkg/leakcheck</span><span class="sub">仅测试</span></div>
+    <div class="list">
+      <div class="row"><span>Run(m)</span><code>测试通过后读 pprof goroutineleak · total &gt; 0 → 退出码 1</code></div>
+      <div class="row"><span>使用方</span><code>cache · event/bus · job · util/async · webhook · pkg/busen 的 TestMain</code></div>
+    </div>
+  </div>
+
+  <div id="signature">Designed By L1nSn0w &amp; Claude</div>
+  <div id="watermark" hidden></div>
+</div>
+
+</main>
+
+<aside id="card" hidden></aside>
+
+<dialog id="about">
+  <div>
+    <h2>关于 Ech0</h2>
+    <form method="dialog"><button class="close" aria-label="关闭">×</button></form>
+
+    <h3>是什么</h3>
+    <p><b>Ech0 是一个自托管的轻量个人微博（时间线）平台。</b>
+      一个 Go 二进制同时提供 REST API 与内嵌的 Vue 3 SPA，数据默认全部落在 <code>data/</code>：SQLite 数据库、上传文件与日志。</p>
+    <p>后端按 handler → service → repository → model 严格分层，由 Wire 在编译期装配；副作用经进程内事件总线解耦；
+      LLM 能力分为出站的 Agent 与入站的 MCP 两个方向。<code>pkg/</code> 下是几个与业务无关的自研库。</p>
+    <p>设计基调：轻量优先；依赖一律指向纯词汇包。</p>
+
+    <h3>从哪里开始</h3>
+    <p style="margin: 0 0 6px">沿编号角标阅读。每个角标会打开一张卡片，卡片底部链接到下一步。</p>
+    <ol class="tour"></ol>
+
+    <h3>角标颜色</h3>
+    <p style="margin: 0 0 12px">框左上角的实心角标说明这个框装的是什么，点击可看详情。线型见标题下的图例。</p>
+    <dl>
+      <dt><span class="tag" style="--c: var(--ech0)">Ech0 · 单个 Go 二进制</span></dt>
+      <dd>进程边界，以及 HTTP 入口与业务领域。框内都是同一个进程。</dd>
+      <dt><span class="tag" style="--c: var(--ai)">internal/agent</span></dt>
+      <dd>LLM 能力层：出站的 Agent 与入站的 MCP。</dd>
+      <dt><span class="tag" style="--c: var(--bus)">事件</span></dt>
+      <dd>事件总线、事件目录与订阅者。</dd>
+      <dt><span class="tag" style="--c: var(--infra)">internal/ 基础设施</span></dt>
+      <dd>业务之下的基础设施：数据库、事务、缓存、KV、设置、存储、访客、验证码、job、task。</dd>
+      <dt><span class="tag" style="--c: var(--pkg)">pkg/ · 自研库</span></dt>
+      <dd>与业务解耦、可单独复用的库。</dd>
+      <dt><span class="tag" style="--c: var(--store)">data/ · 本地磁盘</span></dt>
+      <dd>进程外的持久化：磁盘上的 data/ 与可选的 S3。</dd>
+      <dt><span class="tag" style="--c: var(--client); color: #1f2328">客户端</span></dt>
+      <dd>Ech0 的客户端：内嵌 SPA、API 与 MCP 客户端、RSS。</dd>
+      <dt><span class="tag" style="--c: var(--muted); color: var(--bg)">外部用户</span></dt>
+      <dd>Ech0 之外的人和服务。</dd>
+    </dl>
+  </div>
+</dialog>
+
+<script>
+  // Theme: follows the system until toggled; the choice is remembered per browser
+  const root = document.documentElement;
+  try { const t = localStorage.getItem('theme'); if (t) root.dataset.theme = t; } catch {}
+  document.getElementById('theme').onclick = () => {
+    const dark = root.dataset.theme
+      ? root.dataset.theme === 'dark'
+      : matchMedia('(prefers-color-scheme: dark)').matches;
+    root.dataset.theme = dark ? 'light' : 'dark';
+    try { localStorage.setItem('theme', root.dataset.theme); } catch {}
+  };
+
+  // Watermark: off by default, the droplet button shows and hides it
+  const wmToggle = document.getElementById('wm-toggle'), watermark = document.getElementById('watermark');
+  wmToggle.onclick = () => {
+    watermark.hidden = !watermark.hidden;
+    wmToggle.setAttribute('aria-pressed', !watermark.hidden);
+  };
+
+  // About: the info button opens it; the close button, Esc or a click on the backdrop shuts it
+  const about = document.getElementById('about');
+  document.getElementById('info').onclick = () => about.showModal();
+  about.onclick = e => { if (e.target === about) about.close(); };   // only the backdrop hits the dialog itself
+
+  // Hand tool: dragging with the left button scrolls the page, so the wheel, trackpad and scrollbars
+  // work as before. A link, the toggle or the page's own scrollbar still gets the press
+  let panned = false;                        // the click that ends a drag must not open a tag's card
+  document.addEventListener('mousedown', e => {
+    if (e.button !== 0 || e.target.closest('a, button, dialog, #card')) return;
+    if (e.clientX >= root.clientWidth || e.clientY >= root.clientHeight) return;
+    e.preventDefault();                      // no text selection, no image ghost-drag
+    const x0 = e.clientX, y0 = e.clientY;
+    let x = x0, y = y0;
+    panned = false;
+    root.classList.add('panning');
+    const move = e => {
+      scrollBy(x - e.clientX, y - e.clientY); x = e.clientX; y = e.clientY;
+      if (Math.abs(x - x0) + Math.abs(y - y0) > 3) panned = true;
+    };
+    addEventListener('mousemove', move);
+    addEventListener('mouseup', () => {
+      root.classList.remove('panning');
+      removeEventListener('mousemove', move);
+    }, { once: true });
+  });
+
+  // Zoom: ⌘ / Ctrl + wheel (or a trackpad pinch) scales the page around the pointer; 0 resets to 100% there.
+  // CSS zoom on the page (not the body, so the dialog stays at 100%) changes the layout size,
+  // so scrolling and the hand tool work at any scale
+  const page = document.getElementById('page'), canvas = document.getElementById('canvas');
+  let zoom = 1, px = 0, py = 0;
+  function zoomTo(z, cx, cy) {
+    z = Math.min(2, Math.max(0.15, z));
+    let r = canvas.getBoundingClientRect();
+    const u = (cx - r.left) / zoom, v = (cy - r.top) / zoom;       // the canvas point under (cx, cy)
+    page.style.zoom = zoom = z;
+    r = canvas.getBoundingClientRect();
+    scrollBy(r.left + u * z - cx, r.top + v * z - cy);
+  }
+  addEventListener('mousemove', e => { px = e.clientX; py = e.clientY; });
+  addEventListener('wheel', e => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    // a mouse notch arrives as ~100px, a pinch as a stream of small deltas: cap the step so both feel alike
+    zoomTo(zoom * Math.exp(-Math.max(-25, Math.min(25, e.deltaY)) / 100), e.clientX, e.clientY);
+  }, { passive: false });
+  addEventListener('keydown', e => {
+    if (e.key === '0' && !e.ctrlKey && !e.metaKey && !e.altKey) zoomTo(1, px, py);
+    if (e.key === 'Escape') closeCard();
+  });
+
+  // Tag cards: what each filled tag's frame is, in a few lines. STEPS is the tour: its tags get a number,
+  // its cards a link to the next, and About lists it
+  const KINDS = {
+    outside:  ['Ech0 之外', 'var(--muted)', 'var(--bg)'],
+    clients:  ['客户端', 'var(--client)', '#1f2328'],
+    platform: ['进程边界', 'var(--ech0)'],
+    ech0:     ['Ech0 进程内', 'var(--ech0)'],
+    ai:       ['LLM 能力层', 'var(--ai)'],
+    events:   ['事件', 'var(--bus)'],
+    hook:     ['出站投递', 'var(--hook)'],
+    infra:    ['internal/ 基础设施', 'var(--infra)'],
+    pkg:      ['pkg/ 自研库', 'var(--pkg)'],
+    store:    ['持久化', 'var(--store)'],
+    runtime:  ['生命周期', 'var(--ink)', 'var(--bg)'],
+  };
+  const CARDS = {
+    users: { kind: 'outside', title: '外部用户', gist: '谁在用 Ech0',
+      text: '从这里开始。站长、管理员和访客在浏览器里使用 Web SPA；集成方用带 scope 的 access token 调 API；AI 助手用户通过 MCP 客户端把 Ech0 当成一组工具；订阅者用 RSS 阅读器拉取内容。沿连线往右，所有请求都进入同一个 Gin 进程。' },
+    clients: { kind: 'clients', title: '客户端',
+      text: 'Web SPA 内嵌在二进制里（<code>template/dist</code>），由 <code>/</code> 路由组提供；登录后用 Bearer JWT 调 <code>/api</code>，Copilot 对话与系统日志走 SSE / WebSocket。API 客户端和 MCP 客户端使用 access token，audience 分别是 <code>cli</code> / <code>integration</code> 和 <code>mcp-remote</code>。RSS、sitemap、robots 走资源路由组。' },
+    receivers: { kind: 'outside', title: 'Webhook 接收方',
+      text: '在设置页或经 MCP 工具配置的 webhook 端点。Ech0 以 POST JSON 推送 13 类事件，带 <code>X-Ech0-Event</code>、<code>X-Ech0-Timestamp</code> 等头；设置了 Secret 时附 <code>X-Ech0-Signature: sha256=HMAC-SHA256(secret, body)</code>。' },
+    thirdparty: { kind: 'outside', title: '外部服务',
+      text: 'Ech0 主动访问的外部服务：OAuth2 / OIDC 身份源（auth 域交换 code）、其他 Ech0 实例（connect 域互联）、OpenAI 兼容的 Embedding API（向量索引），以及 LLM Provider（Copilot 的 Agent 循环，流式返回，支持工具调用）。' },
+    ops: { kind: 'outside', title: '运维',
+      text: '在服务器上直接运行 <code>ech0</code>：<code>serve</code> 启动服务，裸 <code>ech0</code> 或 <code>tui</code> 进入 TUI；<code>export</code> / <code>import</code> 各有 <code>capsule</code> 与 <code>snapshot</code> 两种格式；<code>check</code> 校验 capsule，<code>build</code> 把 capsule 烘焙成只读静态站点。' },
+    data: { kind: 'store', title: 'data/ · 本地磁盘',
+      text: '默认的数据根目录，Docker 中挂载为 <code>/app/data</code>：SQLite 数据库 <code>ech0.db</code>（WAL、busy_timeout 5s、<code>_txlock=immediate</code>、sqlite-vec）、本地文件 <code>files/</code>（按扩展名分目录）、JSON 行日志 <code>app.log</code>。快照就是把 <code>data/</code> 打成 zip，数据库部分用 <code>VACUUM INTO</code> 的一致副本。' },
+    s3: { kind: 'store', title: '对象存储',
+      text: '可选的 S3 兼容后端（AWS / MinIO / R2）。配置存在 KV 的 <code>s3_setting</code> 里，由 <code>storage.Manager</code> 热切换；可以配 CDN URL 与路径前缀；上传支持 24 小时的预签名直传。启用后定时快照也会上传到 S3。' },
+    platform: { kind: 'platform', title: 'Ech0 · 单个 Go 二进制',
+      text: '整个后端都在一个进程里：HTTP 入口、15 个业务领域、Agent / MCP 能力层、事件总线与订阅者、internal/ 基础设施，以及 pkg/ 下的自研库。进程外只有磁盘上的 <code>data/</code> 和可选的外部服务。右侧一列是启动链：Cobra → bootstrap → Wire → app.App。' },
+    http: { kind: 'ech0', title: 'HTTP 入口', gist: '请求如何进来',
+      text: 'Gin 引擎上挂着 Huma（类型优先的 OpenAPI）。全局中间件依次是 Recovery、PoweredBy、CORS、i18n、WriteGuard。每个 Huma 操作声明一个 posture：<code>public()</code> / <code>optional()</code> / <code>secured(scopes…).audience(…)</code>，它同时生成 OpenAPI 的安全声明和运行时中间件链，二者不会漂移。SSE、WebSocket、上传、下载、MCP 等非 JSON 端点仍是原生 gin 路由。' },
+    domains: { kind: 'ech0', title: '业务领域', gist: '15 个领域，四层结构',
+      text: '严格四层：handler → service → repository → model，每个领域在四层各有一个并列包，跨层导入必须用 <code>xxxHandler</code> / <code>xxxService</code> 等别名。handler 是与框架无关的 <code>func(ctx, *Input) (Result[T], error)</code>；service 负责编排事务、缓存和事件；repository 用 <code>getDB(ctx)</code> 优先取事务。副作用一律通过发事件完成，不在 handler 里直接调其他服务。' },
+    agent: { kind: 'ai', title: 'internal/agent',
+      text: '出站的 LLM 核心：把 OpenAI Chat Completions、OpenAI Responses、Anthropic 三种协议收口为一个 <code>Provider</code>（Complete / Stream），上层是 ReAct 工具循环 <code>agent.Run</code>。它不依赖任何领域包：工具由 copilot service 以 <code>Tool{Def, Execute}</code> 注入，i18n 文案也由调用方传入。SDK 的差异（如流式工具调用分片的拼接）都封装在各 Provider 内部。' },
+    mcp: { kind: 'ai', title: 'internal/mcp',
+      text: '入站的 MCP 服务端，挂在 <code>/mcp</code>（JSON-RPC 2.0，streamable-http）。每个 tool / resource 在注册时声明所需 scope，<code>Server.dispatch</code> 在调用 Adapter 之前统一校验 access token 的 scope，鉴权不会散落进业务代码。与 Agent 方向相反：这里是外部 LLM 调用 Ech0。' },
+    app: { kind: 'runtime', title: 'app.App',
+      text: '通用的组件生命周期编排器，与业务无关。BeforeStart 播种设置并注册事件订阅；按 job → task → server 顺序启动；阻塞至 SIGTERM / SIGINT；在 5 秒预算内逆序停止；AfterStop 退订事件并排空 webhook 池。详见下方「进程生命周期」时间线。' },
+    bus: { kind: 'events', title: 'Event Bus', gist: '把同步写和副作用分开',
+      text: '<code>internal/event/bus</code> 包着一个 <code>*busen.Bus</code> 单例。生产者调用 <code>eventbus.Notify(ctx, bus, event.X{…})</code>，事件按 Go 类型路由给订阅者；实现了 <code>OrderingKey()</code> 的事件按 key 分片，保证同 key 有序。EventRegistrar 在 BeforeStart 注册订阅，AfterStop 逆序退订并排空 webhook 池。注意 webhook.Dispatcher 是同步订阅。' },
+    infra: { kind: 'infra', title: 'internal/ 基础设施', gist: '进程内的基础设施',
+      text: '业务之下的基础设施。只有 job.Manager、task.Manager 和 HTTP server 是有启停的 Component；其余（database、transaction、cache、kvstore、setting、storage、visitor、captcha）都是注入的单例。<code>visitor.Tracker</code>、<code>storage.Manager</code>、<code>job.Manager</code> 有状态，必须在顶层只注入一次，否则 Wire 会悄悄造出第二份。' },
+    pkg: { kind: 'pkg', title: 'pkg/ · 自研库', gist: '与业务解耦的库',
+      text: '六个与业务无关的库：busen（事件总线）、virefs（文件系统抽象）、gocap（PoW 验证码）、viewer（身份上下文）、log（slog 日志管道）、leakcheck（测试用的 goroutine 泄漏检查）。它们都不 import <code>internal/</code>。busen、gocap、viewer、leakcheck 只依赖标准库；virefs 依赖 AWS SDK v2；log 依赖 lumberjack，并内置了一份 tint。' },
+    busen: { kind: 'pkg', title: 'pkg/busen', gist: '一次发布经过什么',
+      text: '类型安全、有界、可异步的进程内事件总线。一次发布先按 Go 类型精确匹配订阅，再过 topic 通配与过滤器；同步订阅在发布者的 goroutine 里执行，异步订阅按 key 的 FNV 哈希进入各 worker 的 mailbox。队列满时怎么办由 Overflow 策略决定，7 个 hook 暴露所有可观测的事件。Ech0 只用到按类型订阅、key 有序和 hooks；topic、中间件、Observer、Shutdown 暂未使用。' },
+    events: { kind: 'events', title: '事件目录', gist: '13 类事件，谁发谁收',
+      text: '<code>internal/event</code> 是纯词汇包：13 个事件结构体，各自用 <code>EventName()</code> 给出稳定的 webhook 名；用户、echo、评论、资源事件用 <code>OrderingKey()</code> 按实体 ID 保序。表中列出每类事件的生产者和四个订阅者。webhook.Dispatcher 订阅全部 13 类，而且是同步订阅。' },
+    webhook: { kind: 'hook', title: 'internal/webhook', gist: '事件如何推到外部',
+      text: 'Dispatcher 是事件总线的同步订阅者：把事件转成中立的 <code>WebhookObservation</code>，查出启用的 webhook，为每个 webhook 往 6 worker、队列 6 的池里提交一个任务；池满时 Submit 阻塞，反压到发布事件的那次请求。Sender 经 egress 守卫发 POST，最多 3 次，只有 2xx 算成功，结果只写回 <code>last_status</code> / <code>last_trigger</code>。' },
+    virefs: { kind: 'pkg', title: 'pkg/virefs', gist: '用 key 统一本地盘与 S3',
+      text: '用扁平的 key 统一本地盘与 S3：FS 接口有 7 个方法，Copier / BatchDeleter / Presigner 是可选能力。Schema 按扩展名把 key 路由到 <code>images/</code>、<code>audios/</code> 等前缀；plugin/zip 为快照和 capsule 提供打包、解包和只读的 zip FS。Ech0 的 <code>storage.Manager</code> 持有一个 StorageSelector（local 常驻，S3 可选），切换 S3 时原子替换。' },
+    gocap: { kind: 'pkg', title: 'pkg/gocap', gist: '评论验证码',
+      text: '内嵌、单节点的 PoW 验证码。challenge 发一个 HS256 签名的 token；浏览器求解 80 个 sha256 前缀难题；redeem 验证解并防重放，换出一次性的 redeem token；评论提交时后端 siteverify，读即删。状态全在内存（memstore），每 2 秒 GC 一次。' },
+    log: { kind: 'pkg', title: 'pkg/log', gist: '日志去了哪里',
+      text: '基于 slog（不是 zap）。fanoutHandler 把每条记录同时交给控制台 handler 和 ringHandler；ringHandler 发布到 LogStreamHub，文件 sink、WebSocket、SSE 都是它的订阅者。所以 <code>data/app.log</code> 里是紧凑 JSON，管理面板里的系统日志是同一条实时流。' },
+    kv: { kind: 'infra', title: 'kvstore · setting · cache · transaction', gist: '设置存在哪里',
+      text: '所有设置都是 <code>setting.Spec[T]</code>，以 JSON 存进 kvstore。生产环境只有 Persistent 一个实现，底层是 <code>key_values</code> 表加 ristretto read-through 缓存。启动时 Seed 只补缺失的键；事务内的读取会绕过缓存。' },
+    visitor: { kind: 'infra', title: 'internal/visitor', gist: '访客统计',
+      text: 'PV / UV 统计是一个 actor：只有 <code>run()</code> 这个 goroutine 读写状态，外部通过 channel 发送记录或查询。Record 不阻塞，队列满就丢；同一 IP 5 分钟内只计一次 PV；VisitorSnapshot 任务每小时落库到 <code>daily_stats</code>，启动时再加载近 7 天。' },
+    jobtask: { kind: 'infra', title: 'internal/job · internal/task', gist: '长任务与定时任务',
+      text: 'job 是一次性的长任务（reindex / migration / export）：每类型一行，同类型同一时刻只跑一个，进度存在内存、终态落库，重启时把遗留的 running 标为失败。task 是 gocron 定时任务：清理孤立文件、定时快照、访客快照。' },
+    lifecycle: { kind: 'runtime', title: '进程生命周期', gist: '启动与关停',
+      text: '从 main 到阻塞：bootstrap 先加载配置并初始化日志，Cobra 分发到 <code>serve</code>，Wire 装配出 <code>app.App</code>。时间线是 <code>app.Run</code> 的全过程：BeforeStart → 顺序启动 → 运行 → 收到信号后逆序停止 → AfterStop。' },
+    viewer: { kind: 'pkg', title: 'pkg/viewer · pkg/leakcheck', gist: '请求身份',
+      text: '<code>viewer.Context</code> 是贯穿请求的身份：鉴权中间件解析 JWT 后放进 context，service、MCP dispatch 和 scope 中间件用 <code>MustFromContext</code> 取出，缺失时回退为 Noop。session token 跳过 scope 检查；access token 必须匹配 audience 并具备全部 scope。leakcheck 只用于测试：TestMain 跑完后检查 goroutine 泄漏。' },
+  };
+  const STEPS = ['users', 'http', 'domains', 'bus', 'infra', 'pkg', 'busen', 'events', 'webhook', 'virefs',
+    'gocap', 'log', 'kv', 'visitor', 'jobtask', 'lifecycle', 'viewer'];
+
+  const card = document.getElementById('card'), tagOf = key => document.querySelector(`[data-card="${key}"]`);
+  STEPS.forEach((key, i) => tagOf(key).insertAdjacentHTML('afterbegin', `<span class="step">${i + 1}</span>`));
+  about.querySelector('.tour').innerHTML = STEPS
+    .map(key => `<li><button type="button" data-go="${key}">${CARDS[key].title}</button> <span>· ${CARDS[key].gist}</span></li>`).join('');
+
+  function showCard(key) {
+    const { kind, title, text } = CARDS[key], [label, bg, fg = '#fff'] = KINDS[kind];
+    const i = STEPS.indexOf(key), next = STEPS[(i + 1) % STEPS.length];
+    card.innerHTML = `<button class="close" type="button" aria-label="关闭">×</button>
+      <span class="tag" style="--c: ${bg}; color: ${fg}">${label}</span><h2>${title}</h2><p>${text}</p>` + (i < 0 ? '' :
+      `<div class="foot">第 ${i + 1} / ${STEPS.length} 步<button class="next" type="button" data-go="${next}">${
+        i + 1 < STEPS.length ? `下一步: ${CARDS[next].title}` : '回到开头'} →</button></div>`);
+    document.querySelector('[data-card].active')?.classList.remove('active');
+    tagOf(key).classList.add('active');
+    card.hidden = false;
+  }
+  function closeCard() {
+    card.hidden = true;
+    document.querySelector('[data-card].active')?.classList.remove('active');
+  }
+  // The tour moves the page so the step's tag sits near the top-left, clear of the docked card
+  function flyTo(key) {
+    const r = tagOf(key).getBoundingClientRect();
+    scrollBy({ left: r.left - 60, top: r.top - 60, behavior: 'smooth' });
+    showCard(key);
+  }
+  document.addEventListener('click', e => {
+    const go = e.target.closest('[data-go]'), tag = e.target.closest('[data-card]');
+    if (go) { about.close(); flyTo(go.dataset.go); }
+    else if (e.target.closest('#card .close')) closeCard();
+    else if (tag && !panned) showCard(tag.dataset.card);
+  });
+
+  // Edges: { from, to, fs, ts, fo?, tOff?, mid?, via?, dir?, kind?, label?, lo?, at?, left?, lp?, strong?, sub? }
+  //   fs/ts: side ∈ l r t b
+  //   fo/tOff: shift the anchor along its side (px from the side's midpoint)
+  //   mid: x (or y) of the elbow; defaults to halfway
+  //   via: explicit corner points [[x, y], …] for routes that need more than one elbow
+  //   dir: 'one' (default) or 'both'; sets arrowheads and which way the dots flow
+  //   kind: 'bus' pub / sub, 'hook' webhook, 'stream' WebSocket, 'sse' server-sent events,
+  //         'ai' LLM / embedding, 'store' persistence, 'life' lifecycle start / stop
+  //   label: drawn beside the first segment, lo px from its start (default 12);
+  //          at: 'end' puts it beside the last segment; left: true puts it left of a vertical one;
+  //          lp: [x, y, 'start' | 'end'] pins it; strong: true draws it bold;
+  //          sub: a second line 22px under the label
+  const EDGES = [
+    // ----- overview: users → clients → the middleware chain -----
+    { from: 'owner',      to: 'spa',       fs: 'r', ts: 'l', tOff: -12, mid: 380 },
+    { from: 'visitor',    to: 'spa',       fs: 'r', ts: 'l', tOff: 12, mid: 380 },
+    { from: 'integrator', to: 'apiclient', fs: 'r', ts: 'l' },
+    { from: 'aiuser',     to: 'mcpclient', fs: 'r', ts: 'l' },
+    { from: 'subscriber', to: 'rss',       fs: 'r', ts: 'l' },
+    // the deeper the client, the further right its elbow, so no two lines cross
+    { from: 'spa',       to: 'mw1', fs: 'r', ts: 'l', tOff: -18, mid: 740, dir: 'both' },
+    { from: 'apiclient', to: 'mw1', fs: 'r', ts: 'l', tOff: -6,  mid: 755 },
+    { from: 'mcpclient', to: 'mw1', fs: 'r', ts: 'l', tOff: 6,   mid: 770 },
+    { from: 'rss',       to: 'mw1', fs: 'r', ts: 'l', tOff: 18,  mid: 785 },
+    { from: 'mw1', to: 'mw2', fs: 'r', ts: 'l' },
+    { from: 'mw2', to: 'mw3', fs: 'r', ts: 'l' },
+    { from: 'mw3', to: 'mw4', fs: 'r', ts: 'l' },
+    { from: 'mw4', to: 'mw5', fs: 'r', ts: 'l' },
+    { from: 'mw5', to: 'authmw', fs: 'b', ts: 't', tOff: 304 },
+    { from: 'authmw', to: 'domains', fs: 'r', ts: 'l', tOff: -128, lo: 8, label: 'viewer.Context' },
+
+    // ----- HTTP entry → what it reaches directly -----
+    { from: 'http', to: 'captcha',   fs: 'b', ts: 't', fo: -190, left: true, lo: 60, label: '/api/cap/*' },
+    { from: 'http', to: 'viewer',    fs: 'b', ts: 't', fo: 15, lo: 150, label: 'viewer.WithContext' },
+    { from: 'http', to: 'visitor-t', fs: 'b', ts: 't', fo: 218, lo: 60, label: 'index.html → Record' },
+    // /mcp: out of the entry's bottom, along the gap over the bus, up into the MCP box
+    { from: 'http', to: 'mcp', fs: 'b', ts: 'b', fo: 320, tOff: -170, via: [[1560, 928], [3100, 928]], lp: [1570, 920, 'start'], label: '/mcp · JSON-RPC' },
+
+    // ----- domains ↔ capabilities and the outside -----
+    { from: 'domains', to: 'agent', fs: 'r', ts: 'l', fo: 88, tOff: 30, via: [[2944, 688], [2944, 470]], dir: 'both', kind: 'ai', lp: [2952, 604, 'start'], label: 'copilot → agent.Run' },
+    { from: 'mcp', to: 'domains', fs: 'l', ts: 'r', tOff: 160, lo: 8, label: 'Adapter' },
+    { from: 'agent', to: 'llm', fs: 't', ts: 'b', dir: 'both', kind: 'sse', lo: 70, label: '流式 · tool calls' },
+    { from: 'domains', to: 'oauth',    fs: 't', ts: 'b', fo: -420, dir: 'both', lo: 70, label: 'auth · code 交换' },
+    { from: 'domains', to: 'remote',   fs: 't', ts: 'b', fo: -100, lo: 70, label: 'connect' },
+    { from: 'domains', to: 'embedapi', fs: 't', ts: 'b', fo: 240, kind: 'ai', lo: 70, label: 'embedding' },
+
+    // ----- publishers → the bus → subscribers -----
+    { from: 'domains', to: 'bus', fs: 'b', ts: 't', fo: -400, tOff: -400, kind: 'bus', lp: [1918, 950, 'start'], label: 'Notify · Echo* · User* · Comment*' },
+    { from: 'domains', to: 'bus', fs: 'b', ts: 't', fo: -100, tOff: -100, kind: 'bus', lp: [2218, 950, 'start'], label: 'Emit · ResourceUploaded' },
+    { from: 'domains', to: 'bus', fs: 'b', ts: 't', fo: 380, tOff: 380, kind: 'bus', lp: [2682, 950, 'end'], label: 'Notify · SystemExport · 快照计划' },
+    { from: 'job', to: 'bus', fs: 'l', ts: 'r', fo: -20, via: [[3000, 1002], [3000, 982]], kind: 'bus', lp: [3620, 994, 'end'], label: 'pub · SystemSnapshot' },
+    { from: 'bus', to: 'sub-webhook',  fs: 'b', ts: 't', fo: -450, kind: 'bus' },
+    { from: 'bus', to: 'sub-embed',    fs: 'b', ts: 't', fo: -150, kind: 'bus' },
+    { from: 'bus', to: 'sub-agent',    fs: 'b', ts: 't', fo: 150, kind: 'bus' },
+    { from: 'bus', to: 'sub-snapshot', fs: 'b', ts: 't', fo: 450, kind: 'bus' },
+    { from: 'sub-webhook', to: 'recv', fs: 'l', ts: 'r', kind: 'hook', lp: [352, 1104, 'start'], label: 'POST · HMAC-SHA256' },
+    { from: 'sub-agent', to: 'kvstore', fs: 'b', ts: 't', fo: -80, tOff: 106, left: true, lo: 60, label: '删 gen_recent' },
+    { from: 'sub-snapshot', to: 'task', fs: 'r', ts: 'b', lo: 100, label: '重载 cron' },
+
+    // ----- the boot chain and the app's components -----
+    { from: 'op',   to: 'cmd',  fs: 'l', ts: 'r', lo: 12, label: 'ech0 <verb>' },
+    { from: 'cmd',  to: 'boot', fs: 'b', ts: 't' },
+    { from: 'boot', to: 'wire', fs: 'b', ts: 't' },
+    { from: 'wire', to: 'app',  fs: 'b', ts: 't' },
+    { from: 'app', to: 'http', fs: 'l', ts: 't', fo: -55, via: [[3610, 610], [3610, 270], [1240, 270]], kind: 'life', lp: [3600, 262, 'end'], label: 'start · stop' },
+    { from: 'app', to: 'job',  fs: 'b', ts: 't', fo: -135, kind: 'life' },
+    { from: 'app', to: 'task', fs: 'b', ts: 't', fo: 135, kind: 'life' },
+
+    // ----- domains → infra: through the corridors either side of the bus -----
+    { from: 'domains', to: 'setting', fs: 'l', ts: 't', fo: 280, tOff: -166, via: [[1700, 880]], lp: [1692, 1262, 'end'], label: 'setting.Get / Set[T]' },
+    { from: 'domains', to: 'transaction', fs: 'r', ts: 't', fo: 234, via: [[2940, 834], [2940, 1210], [3090, 1210]], lp: [3098, 1262, 'start'], label: 'Transactor.Run' },
+    { from: 'domains', to: 'storage', fs: 'r', ts: 't', fo: 250, via: [[2956, 850], [2956, 1224], [3498, 1224]], lp: [3506, 1262, 'start'], label: 'Put · Get · Presign' },
+    { from: 'domains', to: 'job', fs: 'r', ts: 'l', fo: 266, tOff: 8, via: [[2972, 866], [2972, 1030]], lp: [2984, 1052, 'start'], label: 'Submit · reindex / migration / export' },
+
+    // ----- inside infra, and down to pkg/ and the disk -----
+    { from: 'setting', to: 'kvstore', fs: 'r', ts: 'l', lo: 10, label: 'JSON' },
+    { from: 'kvstore', to: 'cache',   fs: 'r', ts: 'l' },
+    { from: 'kvstore', to: 'database', fs: 'b', ts: 'b', tOff: -60, via: [[2274, 1456], [3846, 1456]], kind: 'store', lp: [2286, 1450, 'start'], label: 'key_values' },
+    { from: 'transaction', to: 'database', fs: 'b', ts: 'b', tOff: -20, via: [[3090, 1440], [3886, 1440]], lp: [3102, 1434, 'start'], label: 'tx in ctx' },
+    { from: 'captcha', to: 'gocap',  fs: 'b', ts: 't', fo: -70 },
+    { from: 'storage', to: 'virefs', fs: 'b', ts: 't' },
+    { from: 'busen',   to: 'bus',    fs: 't', ts: 'l' },
+    { from: 'database', to: 'sqlite', fs: 'r', ts: 'l', kind: 'store' },
+    { from: 'virefs', to: 'files', fs: 'r', ts: 'l', kind: 'store', lo: 12, label: 'LocalFS' },
+    { from: 'virefs', to: 's3', fs: 'b', ts: 'l', fo: 60, kind: 'store', lp: [3566, 1774, 'start'], label: 'ObjectFS · S3 API' },
+    { from: 'log', to: 'applog', fs: 'b', ts: 'l', via: [[2010, 1740], [4230, 1740], [4230, 1432]], kind: 'store', lp: [2030, 1734, 'start'], label: 'file sink · lumberjack' },
+
+    // ----- busen: one publish, then the async path -----
+    { from: 'bs1', to: 'bs2', fs: 'r', ts: 'l' },
+    { from: 'bs2', to: 'bs3', fs: 'r', ts: 'l' },
+    { from: 'bs3', to: 'bs4', fs: 'r', ts: 'l' },
+    { from: 'bs4', to: 'bs5', fs: 'r', ts: 'l' },
+    { from: 'bs4', to: 'bs-async', fs: 'b', ts: 't', tOff: 270, via: [[1610, 2155], [900, 2155]], kind: 'bus', lp: [1618, 2170, 'start'], label: 'Async()' },
+    { from: 'mb0', to: 'w0', fs: 'r', ts: 'l', kind: 'bus' },
+    { from: 'mb1', to: 'w1', fs: 'r', ts: 'l', kind: 'bus' },
+    { from: 'mb2', to: 'w2', fs: 'r', ts: 'l', kind: 'bus' },
+    { from: 'bs-async', to: 'bs-over', fs: 'r', ts: 'l', lo: 8, label: '满' },
+
+    // ----- webhook: the five steps, then the guarded client -----
+    { from: 'wh1', to: 'wh2', fs: 'r', ts: 'l', kind: 'hook' },
+    { from: 'wh2', to: 'wh3', fs: 'r', ts: 'l', kind: 'hook' },
+    { from: 'wh3', to: 'wh4', fs: 'r', ts: 'l', kind: 'hook' },
+    { from: 'wh4', to: 'wh5', fs: 'r', ts: 'l', kind: 'hook' },
+    { from: 'wh5', to: 'wh-egress', fs: 'b', ts: 't', via: [[1966, 3175], [1170, 3175]], kind: 'hook', lp: [1500, 3169, 'start'], label: 'egress.NewClient(Guard, 5s)' },
+
+    // ----- virefs: the interface, its two implementations, and Ech0's storage on top -----
+    { from: 'vf-fs', to: 'vf-local',  fs: 'r', ts: 'l', fo: -30, mid: 3010 },
+    { from: 'vf-fs', to: 'vf-object', fs: 'r', ts: 'l', fo: 30, mid: 3010 },
+    { from: 'vf-storage', to: 'vf-local',  fs: 'l', ts: 'r', fo: -15, mid: 3710 },
+    { from: 'vf-storage', to: 'vf-object', fs: 'l', ts: 'r', fo: 60, mid: 3710 },
+
+    // ----- gocap: challenge → solve → redeem → siteverify -----
+    { from: 'gc1', to: 'gc2', fs: 'r', ts: 'l' },
+    { from: 'gc2', to: 'gc3', fs: 'r', ts: 'l' },
+    { from: 'gc3', to: 'gc4', fs: 'r', ts: 'l' },
+    { from: 'gc3', to: 'gc-store', fs: 'b', ts: 't', via: [[1435, 3835], [430, 3835]], kind: 'store', lp: [440, 3830, 'start'], label: 'TryMarkChallengeSigUsed · StoreRedeemToken' },
+    { from: 'gc4', to: 'gc-ech0', fs: 'b', ts: 't', tOff: 75 },
+
+    // ----- log: fan out, then the hub's subscribers -----
+    { from: 'lg-api',  to: 'lg-fan',  fs: 'r', ts: 'l' },
+    { from: 'lg-fan',  to: 'lg-con',  fs: 'r', ts: 'l', fo: -20, mid: 3085 },
+    { from: 'lg-fan',  to: 'lg-ring', fs: 'r', ts: 'l', fo: 20, mid: 3085 },
+    { from: 'lg-ring', to: 'lg-hub',  fs: 'r', ts: 'l' },
+    { from: 'lg-hub',  to: 'lg-ws',   fs: 'r', ts: 'l', fo: -20, mid: 3950, kind: 'stream' },
+    { from: 'lg-hub',  to: 'lg-sse',  fs: 'r', ts: 'l', mid: 3960, kind: 'sse' },
+    { from: 'lg-hub',  to: 'lg-file', fs: 'r', ts: 'l', fo: 20, mid: 3970 },
+    { from: 'lg-file', to: 'lg-applog', fs: 'b', ts: 't', kind: 'store' },
+    { from: 'lg-applog', to: 'lg-tail', fs: 'b', ts: 't', lo: 22, label: '读文件尾' },
+
+    // ----- kv: Spec → Store → repository, with the cache beside it -----
+    { from: 'kv-spec', to: 'kv-kv',   fs: 'r', ts: 'l', mid: 740 },
+    { from: 'kv-kv',   to: 'kv-repo', fs: 'b', ts: 't' },
+    { from: 'kv-repo', to: 'kv-cache', fs: 'r', ts: 'l', dir: 'both' },
+    { from: 'kv-repo', to: 'kv-db',   fs: 'b', ts: 't', kind: 'store' },
+
+    // ----- visitor: requests go in through the channel; everyone else asks the actor -----
+    { from: 'v-web', to: 'v-rec',   fs: 'r', ts: 'l' },
+    { from: 'v-rec', to: 'v-ch',    fs: 'r', ts: 'l' },
+    { from: 'v-ch',  to: 'v-actor', fs: 'b', ts: 't' },
+    { from: 'v-dash', to: 'v-actor', fs: 'r', ts: 'l', tOff: -64, dir: 'both' },
+    { from: 'v-task', to: 'v-actor', fs: 'r', ts: 'l', tOff: 62, dir: 'both' },
+    { from: 'v-task', to: 'v-db', fs: 'b', ts: 't', kind: 'store', lo: 30, label: 'Upsert 今日 · 删 6 天前' },
+
+    // ----- job: submit → run → done -----
+    { from: 'j-sub', to: 'j-run', fs: 'r', ts: 'l' },
+    { from: 'j-run', to: 'j-end', fs: 'r', ts: 'l' },
+
+    // ----- lifecycle: main to app.Run -----
+    { from: 'lc-main',  to: 'lc-boot',  fs: 'r', ts: 'l' },
+    { from: 'lc-boot',  to: 'lc-cobra', fs: 'r', ts: 'l' },
+    { from: 'lc-cobra', to: 'lc-wire',  fs: 'r', ts: 'l' },
+    { from: 'lc-wire',  to: 'lc-run',   fs: 'r', ts: 'l' },
+
+    // ----- viewer: attached by the middleware, read everywhere downstream -----
+    { from: 'vw-mw',  to: 'vw-ctx', fs: 'r', ts: 'l' },
+    { from: 'vw-ctx', to: 'vw-use', fs: 'r', ts: 'l' },
+  ];
+
+  // Measured against the canvas, so an element nested in a zone can be an end too
+  const canvasBox = document.getElementById('canvas').getBoundingClientRect();
+  function anchor(id, side, off = 0) {
+    const el = document.getElementById(id);
+    if (!el) throw new Error(`edge end #${id} not found`);
+    const r = el.getBoundingClientRect();
+    const x = r.left - canvasBox.left, y = r.top - canvasBox.top, w = r.width, h = r.height;
+    return {
+      l: [x, y + h / 2 + off], r: [x + w, y + h / 2 + off],
+      t: [x + w / 2 + off, y], b: [x + w / 2 + off, y + h],
+    }[side];
+  }
+
+  // Orthogonal routing: H-V-H for horizontal sides, V-H-V for vertical, L-shape when mixed
+  function route([x1, y1], [x2, y2], fs, ts, mid, via) {
+    if (via) return [[x1, y1], ...via, [x2, y2]];
+    const hz = s => s === 'l' || s === 'r';
+    if (hz(fs) && hz(ts)) { const mx = mid ?? (x1 + x2) / 2; return [[x1, y1], [mx, y1], [mx, y2], [x2, y2]]; }
+    if (!hz(fs) && !hz(ts)) { const my = mid ?? (y1 + y2) / 2; return [[x1, y1], [x1, my], [x2, my], [x2, y2]]; }
+    return hz(fs) ? [[x1, y1], [x2, y1], [x2, y2]] : [[x1, y1], [x1, y2], [x2, y2]];
+  }
+
+  // Where a line crosses one drawn before it, it hops over with a half circle
+  // (up on a horizontal run, right on a vertical one)
+  const HOP = 5, drawn = [];
+  function path(pts) {
+    let d = `M${pts[0][0]},${pts[0][1]}`;
+    for (let i = 1; i < pts.length; i++) {
+      const [x1, y1] = pts[i - 1], [x2, y2] = pts[i];
+      const h = y1 === y2, s = Math.sign(h ? x2 - x1 : y2 - y1);
+      const [lo, hi] = h ? [Math.min(x1, x2), Math.max(x1, x2)] : [Math.min(y1, y2), Math.max(y1, y2)];
+      const cuts = drawn
+        .filter(([[a, b], [c, e]]) => h
+          ? a === c && a > lo + HOP && a < hi - HOP && Math.min(b, e) < y1 && Math.max(b, e) > y1
+          : b === e && b > lo + HOP && b < hi - HOP && Math.min(a, c) < x1 && Math.max(a, c) > x1)
+        .map(([[a, b]]) => (h ? a : b))
+        .sort((p, q) => s * (p - q));
+      for (const c of cuts) {
+        const [p, q] = h ? [[c - s * HOP, y1], [c + s * HOP, y1]] : [[x1, c - s * HOP], [x1, c + s * HOP]];
+        d += ` L${p} A${HOP},${HOP} 0 0 ${s > 0 ? 1 : 0} ${q}`;
+      }
+      d += ` L${x2},${y2}`;
+    }
+    for (let i = 1; i < pts.length; i++) drawn.push([pts[i - 1], pts[i]]);
+    return d;
+  }
+
+  // Dots travel at a constant speed, spaced roughly GAP px apart
+  const SPEED = 80, GAP = 140;
+  const MOTION = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.getElementById('edges');
+
+  function dots(d, len, reverse, phase, cls) {
+    const dur = len / SPEED;
+    const n = Math.max(1, Math.round(len / GAP));
+    for (let i = 0; i < n; i++) {
+      const c = document.createElementNS(NS, 'circle');
+      c.setAttribute('r', 2.2);
+      c.setAttribute('class', cls);
+      const m = document.createElementNS(NS, 'animateMotion');
+      m.setAttribute('path', d);
+      m.setAttribute('dur', `${dur}s`);
+      m.setAttribute('begin', `${-dur * (i + phase) / n}s`);
+      m.setAttribute('repeatCount', 'indefinite');
+      if (reverse) {
+        m.setAttribute('keyPoints', '1;0');
+        m.setAttribute('keyTimes', '0;1');
+        m.setAttribute('calcMode', 'linear');
+      }
+      c.appendChild(m);
+      svg.appendChild(c);
+    }
+  }
+
+  for (const { from, to, fs, ts, fo = 0, tOff = 0, mid, via, dir = 'one', kind = '', lo = 12, label, at, left, lp, strong, sub } of EDGES) {
+    const a = anchor(from, fs, fo);
+    const b = anchor(to, ts, tOff);
+    const d = path(route(a, b, fs, ts, mid, via));
+    const marker = kind ? `url(#arrow-${kind})` : 'url(#arrow)';
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', d);
+    p.setAttribute('class', `edge ${kind}`);
+    p.setAttribute('marker-end', marker);
+    if (dir === 'both') p.setAttribute('marker-start', marker);
+    svg.appendChild(p);
+
+    // SSE reads as a double line: a background-coloured core over the wide stroke, stopped short of the arrowheads
+    if (kind === 'sse') {
+      const len = p.getTotalLength(), gap = 11, lead = dir === 'both' ? gap : 0;
+      const core = document.createElementNS(NS, 'path');
+      core.setAttribute('d', d);
+      core.setAttribute('class', 'edge sse-core');
+      core.setAttribute('stroke-dasharray', `0 ${lead} ${len - lead - gap} ${len}`);
+      svg.appendChild(core);
+    }
+
+    if (MOTION) {
+      const len = p.getTotalLength();
+      dots(d, len, false, 0, `dot ${kind}`);
+      if (dir === 'both') dots(d, len, true, 0.5, `dot ${kind}`);
+    }
+
+    if (label) {
+      const t = document.createElementNS(NS, 'text');
+      // the side table works for either end: the label sits beside the segment touching that side
+      const [[x, y], side] = at === 'end' ? [b, ts] : [a, fs];
+      const dx = left ? -8 : 8, anchorAt = left ? 'end' : 'start';
+      const off = { r: [lo, -8, 'start'], l: [-lo, -8, 'end'], t: [dx, -lo, anchorAt], b: [dx, lo, anchorAt] }[side];
+      const [tx, ty, ta] = lp ?? [x + off[0], y + off[1], off[2]];
+      t.setAttribute('x', tx);
+      t.setAttribute('y', ty);
+      t.setAttribute('text-anchor', ta);
+      t.setAttribute('class', `edge-label ${kind} ${strong ? 'strong' : ''}`);
+      t.textContent = label;
+      svg.appendChild(t);
+      if (sub) {
+        const u = t.cloneNode();
+        u.setAttribute('y', ty + 22);
+        u.textContent = sub;
+        svg.appendChild(u);
+      }
+    }
+  }
+</script>
+</body>
+</html>

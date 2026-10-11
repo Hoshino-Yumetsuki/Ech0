@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lin-snow/ech0/internal/agent"
 	commonModel "github.com/lin-snow/ech0/internal/model/common"
 	echoModel "github.com/lin-snow/ech0/internal/model/echo"
 )
@@ -118,7 +119,7 @@ func TestCollectRange_TruncatesAtCap(t *testing.T) {
 
 func TestChunkEchosByBudget(t *testing.T) {
 	echos := makeEchos(50)
-	budget := estimateTokens(formatEchoLine(echos[0], time.UTC)) * 7
+	budget := agent.EstimateTokens(formatEchoLine(echos[0], time.UTC)) * 7
 	chunks := chunkEchosByBudget(echos, budget, time.UTC)
 	if len(chunks) < 2 {
 		t.Fatalf("got %d chunk(s), expected multiple", len(chunks))
@@ -131,7 +132,7 @@ func TestChunkEchosByBudget(t *testing.T) {
 		}
 		tok := 0
 		for _, e := range ch {
-			tok += estimateTokens(formatEchoLine(e, time.UTC))
+			tok += agent.EstimateTokens(formatEchoLine(e, time.UTC))
 		}
 		if len(ch) > 1 && tok > budget {
 			t.Fatalf("multi-echo chunk exceeds budget: %d > %d", tok, budget)

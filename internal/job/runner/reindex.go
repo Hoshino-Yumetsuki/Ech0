@@ -10,8 +10,6 @@ import (
 	embeddingService "github.com/lin-snow/ech0/internal/service/embedding"
 )
 
-type ReindexPayload struct{}
-
 type ReindexRunner struct {
 	svc embeddingService.Service
 }
@@ -20,7 +18,7 @@ func NewReindexRunner(svc embeddingService.Service) *ReindexRunner {
 	return &ReindexRunner{svc: svc}
 }
 
-func (r *ReindexRunner) Run(ctx context.Context, _ ReindexPayload, report job.ReportFunc) (any, error) {
+func (r *ReindexRunner) Run(ctx context.Context, _ struct{}, report job.ReportFunc) (any, error) {
 	res, err := r.svc.Backfill(ctx, func(progress embeddingService.BackfillResult) {
 		report("indexing", progress)
 	})

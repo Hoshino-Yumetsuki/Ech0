@@ -58,7 +58,7 @@ func newFixture(t *testing.T) (Deps, string) {
 	dataRoot := t.TempDir()
 	selector := storage.NewStorageManagerForTest(dataRoot).GetSelector()
 	kv := kvstore.NewMemory()
-	require.NoError(t, coreSetting.Set(context.Background(), kv, coreSetting.System, testSite))
+	require.NoError(t, coreSetting.System.Set(context.Background(), kv, testSite))
 
 	require.NoError(t, db.Create(&userModel.User{
 		ID: "u-owner", Username: "linsnow", IsAdmin: true, IsOwner: true,
@@ -189,7 +189,7 @@ func TestRun_ManifestRoundTrips(t *testing.T) {
 	assert.Equal(t, []capsule.Connect{{URL: "https://peer.example.com"}}, manifest.Connects)
 	assert.Equal(t, 1, res.Connects)
 
-	stored, err := coreSetting.Get(context.Background(), deps.KV, coreSetting.System)
+	stored, err := coreSetting.System.Get(context.Background(), deps.KV)
 	require.NoError(t, err)
 	assert.Equal(t, capsule.Site{
 		SiteTitle:     stored.SiteTitle,

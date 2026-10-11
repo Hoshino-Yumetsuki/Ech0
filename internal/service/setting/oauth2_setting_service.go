@@ -27,7 +27,7 @@ func (settingService *SettingService) GetOAuth2Setting(
 		return errors.New(commonModel.NO_PERMISSION_DENIED)
 	}
 
-	v, err := coreSetting.Get(ctx, settingService.durableKV, coreSetting.OAuth2)
+	v, err := coreSetting.OAuth2.Get(ctx, settingService.durableKV)
 	if err != nil {
 		return err
 	}
@@ -64,11 +64,11 @@ func (settingService *SettingService) UpdateOAuth2Setting(
 		AuthRedirectAllowedReturnURLs: sanitizeURLList(newSetting.AuthRedirectAllowedReturnURLs),
 		CORSAllowedOrigins:            sanitizeURLList(newSetting.CORSAllowedOrigins),
 	}
-	return coreSetting.Set(ctx, settingService.durableKV, coreSetting.OAuth2, oauthSetting)
+	return coreSetting.OAuth2.Set(ctx, settingService.durableKV, oauthSetting)
 }
 
 func (settingService *SettingService) GetOAuth2Status(status *model.OAuth2Status) error {
-	oauthSetting, err := coreSetting.Get(context.Background(), settingService.durableKV, coreSetting.OAuth2)
+	oauthSetting, err := coreSetting.OAuth2.Get(context.Background(), settingService.durableKV)
 	if err != nil {
 		return err
 	}

@@ -40,7 +40,10 @@ func (s *CopilotService) statsOverviewTool(allTags []echoModel.Tag, locale strin
 			if from == 0 && to == 0 {
 				return agent.ToolOutput{}, errors.New("stats_overview 需要 date_from 与 date_to 指定时间区间")
 			}
-			tagIDs := resolveTagIDs(allTags, a.Tags)
+			tagIDs, err := resolveTagIDs(allTags, a.Tags, locale)
+			if err != nil {
+				return agent.ToolOutput{}, err
+			}
 
 			echos, total, truncated, err := s.collectRange(ctx, user.ID, tagIDs, from, to)
 			if err != nil {

@@ -18,12 +18,15 @@ import (
 
 const maxChatImages = 4
 
-const maxImageBytes = 5 << 20
+// maxSourceImageBytes is the largest stored image worth reading at all; it is
+// downscaled well below this before it is sent (see fitForVision).
+const maxSourceImageBytes = 20 << 20
 
 func (s *CopilotService) enrichHits(
 	ctx context.Context,
 	results []embeddingModel.SearchResult,
 	multimodal bool,
+	budget *imageBudget,
 ) (map[string]string, []agent.ImagePart) {
 	exts := make(map[string]string, len(results))
 	var images []agent.ImagePart
@@ -45,7 +48,7 @@ func (s *CopilotService) enrichHits(
 				files = append(files, ef.File)
 			}
 			if cat.IsImageLike() && multimodal && s.storage != nil && len(images) < maxChatImages {
-				if part, ok := s.loadImagePart(ctx, ef.File); ok {
+				if part, ok := s.loadImagePart(ctx, ef.File); ok && budget.take(len(part.Base64)+len(part.URL)) {
 					images = append(images, part)
 				}
 			}
@@ -108,20 +111,20 @@ func (s *CopilotService) loadImagePart(ctx context.Context, f fileModel.File) (a
 	if !storage.NormalizeCategory(f.Category).IsImageLike() {
 		return agent.ImagePart{}, false
 	}
-	mediaType := f.ContentType
-	if mediaType == "" {
-		mediaType = "image/jpeg"
-	}
 
 	st := storage.NormalizeStorageType(f.StorageType)
 	if st == storage.StorageTypeExternal {
 		if f.URL == "" {
 			return agent.ImagePart{}, false
 		}
+		mediaType, ok := mediaTypeOfURL(f.ContentType, f.URL)
+		if !ok {
+			return agent.ImagePart{}, false
+		}
 		return agent.ImagePart{MediaType: mediaType, URL: f.URL}, true
 	}
 
-	if f.Size > maxImageBytes {
+	if f.Size > maxSourceImageBytes {
 		return agent.ImagePart{}, false
 	}
 	reader, err := s.storage.GetSelector().Get(ctx, st, f.Key)
@@ -129,8 +132,12 @@ func (s *CopilotService) loadImagePart(ctx context.Context, f fileModel.File) (a
 		return agent.ImagePart{}, false
 	}
 	defer func() { _ = reader.Close() }()
-	data, err := io.ReadAll(io.LimitReader(reader, maxImageBytes))
-	if err != nil || len(data) == 0 {
+	data, err := io.ReadAll(io.LimitReader(reader, maxSourceImageBytes+1))
+	if err != nil || len(data) == 0 || len(data) > maxSourceImageBytes {
+		return agent.ImagePart{}, false
+	}
+	mediaType, data, ok := fitForVision(data)
+	if !ok {
 		return agent.ImagePart{}, false
 	}
 	return agent.ImagePart{MediaType: mediaType, Base64: base64.StdEncoding.EncodeToString(data)}, true

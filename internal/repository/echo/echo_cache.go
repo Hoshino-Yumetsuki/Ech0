@@ -63,7 +63,7 @@ func GetEchoPageCacheKey(page, pageSize int, search string, showPrivate bool) st
 	) + ":" + search + ":" + showPrivateStr
 }
 
-func ClearEchoPageCache(cache cache.ICache[string, any]) {
+func ClearEchoPageCache(cache *cache.Cache) {
 	for _, key := range echoPageCacheKeys.SnapshotAndReset() {
 		cache.Delete(key)
 	}
@@ -77,7 +77,7 @@ func TrackTodayEchosCacheKey(cacheKey string) {
 	todayEchoCacheKeys.Track(cacheKey)
 }
 
-func ClearTodayEchosCache(cache cache.ICache[string, any]) {
+func ClearTodayEchosCache(cache *cache.Cache) {
 	for _, key := range todayEchoCacheKeys.SnapshotAndReset() {
 		cache.Delete(key)
 	}
@@ -91,7 +91,7 @@ func TrackRSSCacheKey(cacheKey string) {
 	rssCacheKeys.Track(cacheKey)
 }
 
-func ClearRSSCache(cache cache.ICache[string, any]) {
+func ClearRSSCache(cache *cache.Cache) {
 	for _, key := range rssCacheKeys.SnapshotAndReset() {
 		cache.Delete(key)
 	}

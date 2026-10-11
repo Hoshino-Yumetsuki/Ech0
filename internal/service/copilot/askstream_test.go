@@ -46,7 +46,7 @@ func TestAskStream_StreamingUnsupported(t *testing.T) {
 }
 
 func TestAskStream_EmptyQuestion(t *testing.T) {
-	s := &CopilotService{durableKV: kvstore.NewMemory()}
+	s := &CopilotService{durableKV: kvstore.NewMemory(), userReader: adminReader()}
 	rec := httptest.NewRecorder()
 
 	if err := s.AskStream(helpers.CtxAsUser("u1"), "   ", "zh-CN", "", rec); err != nil {
@@ -68,18 +68,47 @@ func TestAskStream_UserLookupError(t *testing.T) {
 	}
 	rec := httptest.NewRecorder()
 
-	if err := s.AskStream(helpers.CtxAsUser("u1"), "你好", "zh-CN", "", rec); err != nil {
-		t.Fatalf("AskStream should return nil, got %v", err)
+	err := s.AskStream(helpers.CtxAsUser("u1"), "你好", "zh-CN", "", rec)
+	if err == nil || !strings.Contains(err.Error(), "user gone") {
+		t.Fatalf("a failed lookup must be returned before the stream opens, got %v", err)
 	}
-	if body := rec.Body.String(); !strings.Contains(body, "event: error") || !strings.Contains(body, "user gone") {
-		t.Fatalf("expected SSE user-lookup error, got %q", body)
+	if rec.Body.Len() != 0 || rec.Header().Get("Content-Type") == "text/event-stream" {
+		t.Fatalf("nothing may be written before the caller can answer with an HTTP error, got %q", rec.Body.String())
+	}
+}
+
+// A signed-in user who is not the site owner must not reach the owner's model,
+// Echos or conversation — whatever token type they hold.
+func TestCopilot_NonAdminIsRefused(t *testing.T) {
+	s := &CopilotService{
+		durableKV:  kvstore.NewMemory(),
+		userReader: &stubUserReader{user: userModel.User{ID: "u2", Username: "bob"}},
+		asks:       newAskRegistry(),
+	}
+	ctx := helpers.CtxAsUser("u2")
+	rec := httptest.NewRecorder()
+
+	if err := s.AskStream(ctx, "你好", "zh-CN", "", rec); err == nil || err.Error() != commonModel.NO_PERMISSION_DENIED {
+		t.Fatalf("AskStream: want %q, got %v", commonModel.NO_PERMISSION_DENIED, err)
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("AskStream wrote %q for a refused caller", rec.Body.String())
+	}
+	if _, err := s.GetSession(ctx); err == nil {
+		t.Fatalf("GetSession: want refusal")
+	}
+	if err := s.ClearSession(ctx); err == nil {
+		t.Fatalf("ClearSession: want refusal")
+	}
+	if err := s.AnswerAsk(ctx, "ask-1", []AskAnswer{{QuestionID: "q"}}); err == nil || err.Error() != commonModel.NO_PERMISSION_DENIED {
+		t.Fatalf("AnswerAsk: want refusal, got %v", err)
 	}
 }
 
 func TestAskStream_AgentSettingMissing(t *testing.T) {
 	s := &CopilotService{
 		durableKV:  kvstore.NewMemory(),
-		userReader: &stubUserReader{user: userModel.User{ID: "u1", Username: "alice"}},
+		userReader: &stubUserReader{user: userModel.User{ID: "u1", Username: "alice", IsAdmin: true}},
 	}
 	rec := httptest.NewRecorder()
 
@@ -96,7 +125,7 @@ func TestAskStream_AgentRunValidationError(t *testing.T) {
 	seedAgentSetting(t, kv, settingModel.AgentSetting{Enable: false, Protocol: "openai", Model: "gpt"})
 	s := &CopilotService{
 		durableKV:   kv,
-		userReader:  &stubUserReader{user: userModel.User{ID: "u1", Username: "alice"}},
+		userReader:  &stubUserReader{user: userModel.User{ID: "u1", Username: "alice", IsAdmin: true}},
 		echoService: &stubEchoSvc{tags: nil},
 	}
 	rec := httptest.NewRecorder()

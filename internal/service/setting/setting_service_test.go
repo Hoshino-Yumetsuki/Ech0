@@ -400,6 +400,52 @@ func TestUpdateAgentSettings_NormalizesProtocol(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestUpdateAgentSettings_Temperature(t *testing.T) {
+	t.Run("unset is stored as unset", func(t *testing.T) {
+		d := newDeps(t)
+		d.expectAdmin()
+		d.kv.EXPECT().
+			Set(mock.Anything, commonModel.AgentSettingKey, mock.MatchedBy(func(raw string) bool {
+				return !strings.Contains(raw, "temperature")
+			})).
+			Return(nil).
+			Once()
+
+		err := d.build().UpdateAgentSettings(helpers.CtxAsUser(testUserID), &settingModel.AgentSettingDto{
+			Protocol: "openai", Model: "m",
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("configured value is stored", func(t *testing.T) {
+		d := newDeps(t)
+		d.expectAdmin()
+		d.kv.EXPECT().
+			Set(mock.Anything, commonModel.AgentSettingKey, mock.MatchedBy(func(raw string) bool {
+				return strings.Contains(raw, `"temperature":0.7`)
+			})).
+			Return(nil).
+			Once()
+
+		temp := 0.7
+		err := d.build().UpdateAgentSettings(helpers.CtxAsUser(testUserID), &settingModel.AgentSettingDto{
+			Protocol: "openai", Model: "m", Temperature: &temp,
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("out of range is refused", func(t *testing.T) {
+		d := newDeps(t)
+		d.expectAdmin()
+
+		temp := 2.5
+		err := d.build().UpdateAgentSettings(helpers.CtxAsUser(testUserID), &settingModel.AgentSettingDto{
+			Protocol: "openai", Model: "m", Temperature: &temp,
+		})
+		require.EqualError(t, err, commonModel.INVALID_PARAMS)
+	})
+}
+
 func TestUpdateEmbeddingSetting_Persists(t *testing.T) {
 	d := newDeps(t)
 	d.expectAdmin()

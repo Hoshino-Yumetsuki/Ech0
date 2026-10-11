@@ -179,8 +179,12 @@ func TestRunLoop_MaxRoundsForcesFinalNoToolRound(t *testing.T) {
 	if len(fp.gotReqs[0].Tools) != 1 {
 		t.Fatalf("first round Tools len = %d, want 1", len(fp.gotReqs[0].Tools))
 	}
-	if fp.gotReqs[1].Tools != nil {
-		t.Fatalf("forced final round must pass nil Tools, got %v", fp.gotReqs[1].Tools)
+	if len(fp.gotReqs[1].Tools) != 1 || fp.gotReqs[1].ToolChoice != ToolChoiceNone {
+		t.Fatalf("forced final round must keep Tools declared with ToolChoiceNone, got %v / %d",
+			fp.gotReqs[1].Tools, fp.gotReqs[1].ToolChoice)
+	}
+	if fp.gotReqs[0].ToolChoice != ToolChoiceAuto {
+		t.Fatalf("tool rounds must leave the choice to the model, got %d", fp.gotReqs[0].ToolChoice)
 	}
 	if evs[len(evs)-1].Kind != AgentDone {
 		t.Fatalf("last event = %d, want AgentDone", evs[len(evs)-1].Kind)
@@ -368,7 +372,7 @@ func TestRunLoop_TrimsOldestToolResultOverBudget(t *testing.T) {
 		{Role: RoleSystem, Content: "S"},
 		{Role: RoleUser, Content: "Q"},
 		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "t1", Name: "search_echos"}}},
-		{Role: RoleTool, ToolCallID: "t1", Content: strings.Repeat("a", 100)},
+		{Role: RoleTool, ToolCallID: "t1", Content: strings.Repeat("a", 300)},
 		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "t2", Name: "search_echos"}}},
 		{Role: RoleTool, ToolCallID: "t2", Content: strings.Repeat("b", 20)},
 	}
@@ -377,7 +381,7 @@ func TestRunLoop_TrimsOldestToolResultOverBudget(t *testing.T) {
 	runLoopSync(context.Background(), fp, RunRequest{
 		Setting:          enabledSetting(),
 		Messages:         msgs,
-		MaxContextTokens: 50,
+		MaxContextTokens: 40,
 	})
 
 	got := fp.gotReqs[0].Messages

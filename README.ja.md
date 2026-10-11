@@ -4,7 +4,7 @@
 
 # Ech0
 
-[プレビュー](https://memo.vaaat.com/) · [公式サイト & ドキュメント](https://www.ech0.app/) · [リリース](https://lin-snow.github.io/Ech0/) · [Ech0 Hub](https://hub.ech0.app/)
+[プレビュー](https://memo.sn0w.fyi/) · [公式サイト & ドキュメント](https://www.ech0.app/) · [リリース](https://lin-snow.github.io/Ech0/) · [Ech0 Hub](https://hub.ech0.app/)
 
 <a title="en-US" href="./README.md"><img src="https://img.shields.io/badge/-English-545759?style=for-the-badge" alt="English"></a> <a title="zh" href="./README.zh.md"><img src="https://img.shields.io/badge/-简体中文-545759?style=for-the-badge" alt="简体中文"></a> <a title="de" href="./README.de.md"><img src="https://img.shields.io/badge/-Deutsch-545759?style=for-the-badge" alt="Deutsch"></a> <img src="https://img.shields.io/badge/-日本語-F54A00?style=for-the-badge" alt="日本語">
 
@@ -192,7 +192,7 @@ Docker Compose や Helm を使った手順は [かんたんデプロイ](#かん
    Ech0 は現在、運用をシンプルかつ予測可能に保つため、軽量なロールモデル（Owner / Admin / 一般ユーザー）を採用しています。権限モデルはコミュニティのフィードバックに基づき今後も進化します。
 
 8. **他の人の Connect アバターが表示されないのは？**
-   `システム設定 - サービス URL` に現在のインスタンス URL を設定してください。例：`https://memo.vaaat.com`（`http://` または `https://` を含めること）。
+   `システム設定 - サービス URL` に現在のインスタンス URL を設定してください。例：`https://memo.sn0w.fyi/`（`http://` または `https://` を含めること）。
 
 9. **設定の MetingAPI とは？**
    音楽カードが再生用ストリーム情報を解決するために使う API エンドポイントです。自前または信頼できるエンドポイントを指定できます。空欄の場合は、Ech0 のデフォルト・リゾルバが使われます。本番環境では自前のエンドポイントを推奨します。
@@ -249,7 +249,7 @@ Docker Compose や Helm を使った手順は [かんたんデプロイ](#かん
 
 **開発**
 
-ローカル開発のセットアップ、環境要件、フロントエンド／バックエンド連携については **[docs/dev/development.md](./docs/dev/development.md)** を参照してください。より高レベルなアーキテクチャと規約については [`CLAUDE.md`](./CLAUDE.md) と [`CONTRIBUTING.md`](./CONTRIBUTING.md) をご覧ください。
+ローカル開発のセットアップ、環境要件、フロントエンド／バックエンド連携については **[docs/dev/development.md](./docs/dev/development.md)** を参照してください。より高レベルなアーキテクチャと規約については [`CLAUDE.md`](./CLAUDE.md) と [`CONTRIBUTING.md`](./CONTRIBUTING.md) をご覧ください。インタラクティブなアーキテクチャ図は **[ech0.app/arch](https://www.ech0.app/arch)** で公開しています。
 
 ---
 

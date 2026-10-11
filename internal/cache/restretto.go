@@ -13,6 +13,8 @@ type RistrettoCache[K ristretto.Key, V any] struct {
 	cache *ristretto.Cache[K, V]
 }
 
+var _ Backend = (*RistrettoCache[string, any])(nil)
+
 func NewRistrettoCache[K ristretto.Key, V any](
 	maxCost int64,
 	numCounters int64,

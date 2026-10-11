@@ -25,12 +25,12 @@ const (
 
 type AuthRepository struct {
 	db    func() *gorm.DB
-	cache cache.ICache[string, any]
+	cache *cache.Cache
 }
 
 func NewAuthRepository(
 	dbProvider func() *gorm.DB,
-	cache cache.ICache[string, any],
+	cache *cache.Cache,
 ) *AuthRepository {
 	return &AuthRepository{
 		db:    dbProvider,

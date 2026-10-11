@@ -56,7 +56,7 @@ export function sseStream(opts: SSEStreamOptions): () => void {
     }
 
     if (!resp.ok || !resp.body) {
-      opts.onError?.(`HTTP ${resp.status}`)
+      opts.onError?.(await failureMessage(resp))
       return
     }
 
@@ -90,4 +90,21 @@ export function sseStream(opts: SSEStreamOptions): () => void {
   run()
 
   return () => controller.abort()
+}
+
+/**
+ * A request refused before the stream opened comes back as the usual JSON
+ * envelope; its localized `msg` says why, where a bare status code would not.
+ */
+async function failureMessage(resp: Response): Promise<string> {
+  try {
+    const body: unknown = await resp.json()
+    if (body !== null && typeof body === 'object') {
+      const msg = (body as Record<string, unknown>).msg
+      if (typeof msg === 'string' && msg.length > 0) return msg
+    }
+  } catch {
+    // Not JSON: fall back to the status line.
+  }
+  return `HTTP ${resp.status}`
 }

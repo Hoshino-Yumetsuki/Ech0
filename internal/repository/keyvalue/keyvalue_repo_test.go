@@ -16,14 +16,14 @@ import (
 	"gorm.io/gorm"
 )
 
-func newKVRepo(t *testing.T) (*KeyValueRepository, *gorm.DB, cache.ICache[string, any]) {
+func newKVRepo(t *testing.T) (*KeyValueRepository, *gorm.DB, *cache.Cache) {
 	t.Helper()
 	db := helpers.NewTestDB(t)
 	c := helpers.NewTestCache()
 	return NewKeyValueRepository(func() *gorm.DB { return db }, c), db, c
 }
 
-func cacheGetKV(t *testing.T, c cache.ICache[string, any], key string) (any, bool) {
+func cacheGetKV(t *testing.T, c *cache.Cache, key string) (any, bool) {
 	t.Helper()
 	v, ok, err := c.Get(key)
 	require.NoError(t, err)

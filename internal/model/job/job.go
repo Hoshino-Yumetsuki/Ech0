@@ -3,6 +3,8 @@
 
 package model
 
+import migratorModel "github.com/lin-snow/ech0/internal/model/migrator"
+
 type Status string
 
 const (
@@ -17,10 +19,14 @@ func (s Status) IsTerminal() bool {
 	return s == StatusSuccess || s == StatusFailed || s == StatusCancelled
 }
 
+// Kind names a job type and binds it to its payload type P at compile time,
+// so a runner and every Submit for the same kind must agree on P.
+type Kind[P any] string
+
 const (
-	TypeReindex   = "reindex"
-	TypeMigration = "migration"
-	TypeExport    = "export"
+	Reindex   Kind[struct{}]                       = "reindex"
+	Migration Kind[migratorModel.MigrationPayload] = "migration"
+	Export    Kind[migratorModel.ExportPayload]    = "export"
 )
 
 type Job struct {

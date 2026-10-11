@@ -178,7 +178,7 @@ func (userService *UserService) Register(registerDto *authModel.RegisterDto) err
 		return errors.New(commonModel.USERNAME_HAS_EXISTS)
 	}
 
-	sysSetting, err := coreSetting.Get(context.Background(), userService.durableKV, coreSetting.System)
+	sysSetting, err := coreSetting.System.Get(context.Background(), userService.durableKV)
 	if err != nil {
 		return err
 	}

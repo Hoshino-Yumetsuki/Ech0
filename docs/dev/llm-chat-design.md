@@ -320,7 +320,7 @@ Ech0 是**微博客**（朋友圈式的日常分享 + 偶尔的想法/思考）�
 
 1. **embedding 提供方/模型**：跟 agent 用同一 provider 还是独立 endpoint？（已定方向：**独立配置**；具体默认模型待定）
 2. **是否带多轮会话记忆**：~~v1 单轮独立检索，还是带历史的多轮对话（需存会话）？~~——**已决策：带历史多轮**。策略：展示 transcript（`ChatMessage`，含 `Sources`）与喂模型的 context 分离，每轮从持久化会话投影出模型历史（`historyForModel`）；旧轮只留 user/assistant 文本、剥掉过时的检索结果（模型需旧细节会经 `search_echos` 重检索），仅「最近一轮」的 `Sources` 折进文本兜住追问细节；按 token 预算（非条数）滑动窗口截断；摘要压缩留二期。
-3. **top-k / 上下文预算默认值**：top-k 预期 5~8（实现取 `defaultTopK=6`）；历史上下文预算 `maxHistoryTokens=4000`（保守固定值，与模型窗口解耦，按 rune 数粗估，不引 tokenizer）。
+3. **top-k / 上下文预算默认值**：top-k 预期 5~8（实现取 `defaultTopK=6`）；历史上下文预算随 `ContextWindow` 由 `planContext` 划分（300~16k token，见 agent-toolcall-design §18.3）；历史按**整轮**（问题 + 回答）取舍，保证永远以用户问题开头，最新一轮超预算时截断回答而非丢掉问题。
 4. **引用展示粒度**：是否在回答中逐句标注来源，还是仅在末尾列出命中 Echo。
 
 ---

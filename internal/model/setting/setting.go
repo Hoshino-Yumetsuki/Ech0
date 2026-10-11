@@ -99,6 +99,10 @@ type AgentSetting struct {
 	BaseURL       string `json:"base_url"`
 	Multimodal    bool   `json:"multimodal"`
 	ContextWindow int    `json:"context_window"`
+	// Temperature is sent only when set. Left nil, the model runs at its own
+	// default — the only choice that works for every model, since some reject
+	// the parameter outright. Whether a model takes it is for its docs to say.
+	Temperature *float64 `json:"temperature,omitempty"`
 }
 
 type SnapshotSchedule struct {

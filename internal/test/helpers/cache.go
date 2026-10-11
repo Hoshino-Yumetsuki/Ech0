@@ -10,8 +10,8 @@ import (
 	"github.com/lin-snow/ech0/internal/cache"
 )
 
-func NewTestCache() cache.ICache[string, any] {
-	return &testCache{m: make(map[string]any)}
+func NewTestCache() *cache.Cache {
+	return cache.New(&testCache{m: make(map[string]any)})
 }
 
 type testCache struct {

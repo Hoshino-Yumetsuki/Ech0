@@ -18,7 +18,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func newAuthRepo(t *testing.T) (*AuthRepository, *gorm.DB, cache.ICache[string, any]) {
+func newAuthRepo(t *testing.T) (*AuthRepository, *gorm.DB, *cache.Cache) {
 	t.Helper()
 	db := helpers.NewTestDB(t)
 	c := helpers.NewTestCache()

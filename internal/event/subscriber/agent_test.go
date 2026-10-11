@@ -30,6 +30,9 @@ func TestAgentProcessor_Handlers(t *testing.T) {
 		"echo.updated": func(ap *subscriber.AgentProcessor, ctx context.Context) error {
 			return ap.HandleEchoUpdated(ctx, event.EchoUpdated{Echo: helpers.NewEcho()})
 		},
+		"echo.deleted": func(ap *subscriber.AgentProcessor, ctx context.Context) error {
+			return ap.HandleEchoDeleted(ctx, event.EchoDeleted{Echo: helpers.NewEcho()})
+		},
 		"user.deleted": func(ap *subscriber.AgentProcessor, ctx context.Context) error {
 			return ap.HandleUserDeleted(ctx, event.UserDeleted{User: helpers.NewUser()})
 		},
@@ -83,7 +86,7 @@ func TestAgentProcessor_Registrations(t *testing.T) {
 	kv := kvmock.NewMockStore(t)
 	ap := subscriber.NewAgentProcessor(kv)
 	regs := ap.Registrations()
-	require.Len(t, regs, 3)
+	require.Len(t, regs, 4)
 	for i, r := range regs {
 		assert.NotNil(t, r, "registration %d should be non-nil", i)
 	}

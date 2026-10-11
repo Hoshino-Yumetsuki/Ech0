@@ -22,7 +22,7 @@ Ech0 是一个**自托管的轻量个人微博（时间线）平台**，以**单
 | 对象存储 | AWS SDK v2（S3 兼容），经自研 `pkg/virefs` 抽象 |
 | LLM 能力 | 自研 `internal/agent`（OpenAI Chat Completions / OpenAI Responses / Anthropic 三协议 + ReAct 工具循环） |
 | 前端 | Vue 3 + Vite + TS + Pinia + Vue Router + vue-i18n + UnoCSS(Wind4) + markdown-it/Vditor |
-| 自研库（`pkg/`） | busen（事件总线）、gocap（PoW 验证码）、virefs（文件系统抽象）、viewer（请求身份上下文） |
+| 自研库（`pkg/`） | busen（事件总线）、gocap（PoW 验证码）、virefs（文件系统抽象）、viewer（请求身份上下文）、app（组件生命周期）、egress（SSRF 防护出站 HTTP） |
 
 设计基调有两条贯穿全局（详见 `CLAUDE.md`）：
 
@@ -61,7 +61,7 @@ Ech0 是一个**自托管的轻量个人微博（时间线）平台**，以**单
   │ webhook.Dispatcher   subscriber.AgentProcessor   subscriber.EmbeddingProcessor   snapshot │
   └────────────────────────────────────────────────────────────────────────────────────────┘
 
-  生命周期编排: internal/app（Component: server / job.Manager / task.Manager / EventRegistrar）
+  生命周期编排: pkg/app（由 internal/di.ProvideApp 装配 Component: server / job.Manager / task.Manager / EventRegistrar）
               Wire 在 internal/di 装配整张依赖图（§3、§4）
 ```
 
@@ -94,9 +94,9 @@ cmd/ech0/main.go
 
 `internal/bootstrap` 在 Cobra 分发**之前**跑，保证 config / logger 在任何子命令里都已就绪。`internal/cli` 是各 CLI 动词的实现层。快照导入导出**没有** CLI 动词，只在 Web 管理面板「数据管理」里。
 
-### 3.2 组件生命周期（internal/app）
+### 3.2 组件生命周期（pkg/app）
 
-`internal/app` 是一个**通用的组件生命周期编排器**，与具体业务无关。核心契约：
+`pkg/app` 是一个**通用的组件生命周期编排器**，与具体业务无关。核心契约：
 
 ```go
 type Component interface {
@@ -106,7 +106,7 @@ type Component interface {
 // 可选 Namer 接口提供友好名字用于日志/错误
 ```
 
-`app.App` 由 `app.ProvideOptions` 注册三个 `Component` + 若干生命周期 Hook：
+`app.App` 由 `internal/di` 的 `ProvideApp` 注册三个 `Component` + 若干生命周期 Hook（Ech0 专属装配留在 `internal`，`pkg/app` 本身不依赖任何业务包）：
 
 | 阶段 | 动作 |
 | --- | --- |
@@ -437,7 +437,7 @@ internal/mcp/Adapter（adapter_*.go）── 注入 8 个领域 service：
 | 模块 | 角色 | 关键符号 |
 | --- | --- | --- |
 | `internal/server` | 薄 Gin HTTP `Component` | `ProvideHTTPServer`（装路由+中间件）、`Start`(监听) / `Stop`(graceful) |
-| `internal/job` | 长任务框架：Submit→goroutine 跑 Runner→落库 + 内存进度 + 取消 | `Manager`、`Runner`、`ReportFunc`、`JobRepository`；类型 `TypeReindex/TypeMigration/TypeExport`（`job/runner` 为具体 Runner） |
+| `internal/job` | 长任务框架：Submit→goroutine 跑 Runner→落库 + 内存进度 + 取消 | `Manager`（`Register/Submit/Get/Cancel` 为泛型方法）、`RunFunc[P]`、`ReportFunc`、`JobRepository`；类型化作业键 `jobModel.Kind[P]`：`Reindex/Migration/Export`（`job/runner` 为具体 Runner） |
 | `internal/task` | 定时任务（gocron）：`Manager` 持有 `Task` 列表 | `Task.Schedule`、`StopHook`；`task/scheduled` 提供 Cleanup/Snapshot/VisitorSnapshot |
 | `internal/event/bus` 的 `EventRegistrar` | 订阅生命周期：BeforeStart 注册、AfterStop 退订+排空 | 见 §9 |
 
@@ -447,7 +447,7 @@ internal/mcp/Adapter（adapter_*.go）── 注入 8 个领域 service：
 | --- | --- | --- |
 | `internal/config` | env 配置单例（caarlos0/env） | `config.Config()`（sync.Once），见 `.env.example` |
 | `internal/database` | GORM+SQLite 初始化、自动迁移、写锁、热切换 | `GetDB/SetDB`(atomic)、`MigrateDB`、`HotChangeDatabase`（快照用）、`EnableWriteLock` |
-| `internal/cache` | 泛型缓存接口 + Ristretto 实现 | `ICache[K,V]`、`NewCache` |
+| `internal/cache` | 应用缓存：`Backend` 接口（Ristretto 实现）+ 泛型方法读穿透（singleflight 合并、事务内绕过） | `Cache`、`Backend`、`ReadThrough[T]`/`ReadThroughUnlessTx[T]` |
 | `internal/kvstore` | KV 抽象，两实现 | `Store` 接口、`Memory`(易失) / `Persistent`(落库，包 keyvalue repo)；字段命名 `durableKV` / `ephemeralKV` |
 | `internal/transaction` | 事务抽象 | `Transactor.Run`、`GormTransactor` |
 | `internal/storage` | 本地/S3 统一文件抽象（基于 `pkg/virefs`），**有状态单例** | `Manager`、`StorageSelector`、`S3SettingStore`(从 KV 读 S3 设置)、`ReloadFromConfigAndDB`、`ApplyS3Setting` |
@@ -455,12 +455,12 @@ internal/mcp/Adapter（adapter_*.go）── 注入 8 个领域 service：
 | `internal/middleware` | 中间件聚合 | `Deps{TokenRevoker}`；实现：auth/scope/cors/origin/ratelimit/maintenance/nocache/staticfile |
 | `internal/captcha` | PoW 验证码（包 `pkg/gocap`），进程级共享 engine | `SiteVerify`、`NewHTTPHandler`（挂在 `/api`） |
 | `internal/visitor` | PV/UV 追踪器，**actor 模型**（单 goroutine 改状态） | `Tracker.Record/Last7Days/Today/Load`、`DayStat`；由 `task/scheduled.VisitorSnapshot` 落库 |
-| `internal/setting` | 配置引擎：`Spec[T]`(key+default+normalize/migrate) + 注册表 + 播种 | `Get[T]/Set[T]/Seed`；启动时由 `app.ProvideOptions` 调 Seed |
+| `internal/setting` | 配置引擎：`Spec[T]`(key+default+normalize/migrate) + 注册表 + 播种 | `Spec[T].Get/Set/Pristine`、`Seed`；启动时由 `di.ProvideApp` 的 BeforeStart 调 Seed |
 | `internal/migrator` | 导入导出引擎（两段式） | `ExportEngine`/`ImportEngine`；子包 `exporter/{fs,s3}`、`importer/{ech0,memos}`、`snapshot`、`spec`（契约） |
 | `internal/agent` | LLM Provider 抽象 + ReAct loop（详见 §7） | `agent.Run`、`Generate`；Provider 适配 OpenAI Chat Completions / OpenAI Responses / Anthropic |
 | `internal/mcp` | MCP JSON-RPC 服务端（详见 §8） | `Server.ServeHTTP`、`Registry`、`Adapter` |
 | `internal/embedding` | 向量/RAG embedding 客户端（OpenAI 兼容 `/v1/embeddings`） | `Embed/EmbedOne`；service 层有 `Indexer`、`Search`、`Backfill` |
-| `internal/util/*` | 横切工具：log(zap 包装) / crypto / jwt / img / md / timezone / async / egress / uuid / github / tui / cookie / err / format / url ... | 日志须带 `module` 字段，见 `docs/dev/logging.md` |
+| `internal/util/*` | 横切工具：log(zap 包装) / crypto / jwt / img / md / timezone / async / uuid / github / tui / cookie / err / format / url ... | 日志须带 `module` 字段，见 `docs/dev/logging.md` |
 
 **无反向依赖的红线**：`setting`/`kvstore`/`app` 从不 import `service`/`handler`；`job`/`task` 的 runner 可 import service，但 `job`/`task` 核心不 import 具体 runner（靠 `Register` 发现）；`migrator` 核心引擎不依赖 `job`；`agent` 不依赖任何领域包。
 
@@ -468,7 +468,7 @@ internal/mcp/Adapter（adapter_*.go）── 注入 8 个领域 service：
 
 ## 11. `pkg/` 自研库
 
-四个进程内自研库，沉淀通用能力，与业务解耦（除 virefs 用 AWS SDK 外基本零外部依赖）。
+六个进程内自研库，沉淀通用能力，与业务解耦（除 virefs 用 AWS SDK 外基本零外部依赖）。
 
 | 库 | 一句话 | 核心 API | 被谁用 |
 | --- | --- | --- | --- |
@@ -476,6 +476,8 @@ internal/mcp/Adapter（adapter_*.go）── 注入 8 个领域 service：
 | **gocap**（`cap`/`core`/`store`/`transport`） | 内嵌的 PoW 验证码引擎（challenge→redeem→siteverify），内存态 + 限流 + 可插存储 | `cap.Engine`(`Handler()`/`SiteVerify()`/`RegisterSite()`)、`core.Service`、`store.Store` | `internal/captcha` |
 | **virefs**（`plugin/zip`） | 基于 key 的统一文件系统，覆盖本地盘与 S3，支持中间件、迁移、多后端路由 | `FS` 接口、`LocalFS`/`ObjectFS`、`MountTable`/`Schema`、`Migrate`、`Copier/Presigner/BatchDeleter` | `internal/storage`、`internal/migrator/snapshot` |
 | **viewer** | 请求级身份/鉴权上下文抽象（user/token/scope/audience） | `Context` 接口、`NewUserViewer*`、`WithContext`/`FromContext`/`MustFromContext` | auth 中间件、comment/user/file/copilot service、mcp、scope 中间件 |
+| **app** | 通用组件生命周期编排：按序启动、逆序优雅停止、Hook、信号等待、结构化 `AppError` | `App`、`New(opts...)`、`Component`/`Namer`、`Components`/`BeforeStart`/`AfterStop`/`StopTimeout`/`Signals` | `internal/di.ProvideApp`（装配 job / task / server + Seed / EventRegistrar） |
+| **egress** | 统一出站 HTTP：SSRF `Guard`（校验 URL、拦截私网/保留地址、安全 `DialContext`）、超时、响应体上限、重试 | `NewClient(Guard(), Timeout(d))`、`Fetch`、`Validate`、`Retry` | auth(OAuth2)、common、connect、webhook 设置与投递 |
 
 ---
 
@@ -557,7 +559,7 @@ POST /api/chat  (鉴权)
 
 ```
 POST /migration/export  (鉴权)
-  → migratorHandler → migratorService（鉴权 + DTO）→ job.Manager.Submit(TypeExport, payload)
+  → migratorHandler → migratorService（鉴权 + DTO）→ job.Manager.Submit(jobModel.Export, payload)
   → 〔goroutine〕job/runner.ExportRunner → migrator.ExportEngine.Export
        选 FS/S3 后端（storage.Manager）→ 打包 data/ 为 zip（pkg/virefs + plugin/zip）
        → eventbus.Notify(SystemSnapshot)   （触发 webhook 等）
@@ -576,7 +578,7 @@ POST /migration/export  (鉴权)
         cmd (Cobra) ─────────────────────────────────────────────┐
             │ bootstrap(config+logger) → cli → di.BuildApp        │
             ▼                                                       │
-        internal/app  ── 编排 Component ──► server · job · task · EventRegistrar
+        pkg/app       ── 编排 Component ──► server · job · task · EventRegistrar
             │                                                       │
    ┌────────┼───────────────────────────────────────────┐         │
    ▼        ▼                                             ▼         │

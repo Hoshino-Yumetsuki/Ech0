@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"log/slog"
 	"strings"
 
 	"github.com/lin-snow/ech0/internal/embedding"
@@ -44,7 +45,7 @@ func (s *EmbeddingService) WithEmbedder(e Embedder) *EmbeddingService {
 }
 
 func (s *EmbeddingService) getSetting(ctx context.Context) (settingModel.EmbeddingSetting, error) {
-	return coreSetting.Get(ctx, s.durableKV, coreSetting.Embedding)
+	return coreSetting.Embedding.Get(ctx, s.durableKV)
 }
 
 func (s *EmbeddingService) Enabled(ctx context.Context) bool {
@@ -142,13 +143,21 @@ func (s *EmbeddingService) RemoveEcho(ctx context.Context, echoID string) error 
 	return s.repo.Delete(ctx, echoID)
 }
 
-func (s *EmbeddingService) Search(ctx context.Context, query string, k int, authorUsername string) ([]model.SearchResult, error) {
+// Search returns the Echos semantically nearest to query, optionally only those
+// by authorID. It refuses with embedding.ErrIndexNotReady when no index was
+// built for the configured model and dimension — before the first rebuild, or
+// after either was changed — instead of querying a missing table or comparing
+// vectors of the wrong size; callers fall back to keyword search on any error.
+func (s *EmbeddingService) Search(ctx context.Context, query string, k int, authorID string) ([]model.SearchResult, error) {
 	setting, err := s.getSetting(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if !setting.Enable || setting.Model == "" || setting.Dim <= 0 {
 		return nil, embedding.ErrNotEnabled
+	}
+	if !s.indexMatches(ctx, setting) {
+		return nil, embedding.ErrIndexNotReady
 	}
 	if k <= 0 {
 		k = defaultTopK
@@ -157,7 +166,19 @@ func (s *EmbeddingService) Search(ctx context.Context, query string, k int, auth
 	if err != nil {
 		return nil, err
 	}
-	return s.repo.Search(ctx, vec, k, authorUsername)
+	return s.repo.Search(ctx, vec, k, authorID)
+}
+
+func (s *EmbeddingService) indexMatches(ctx context.Context, setting settingModel.EmbeddingSetting) bool {
+	raw, err := s.durableKV.Get(ctx, commonModel.EmbeddingIndexStateKey)
+	if err != nil {
+		return false
+	}
+	var state model.IndexState
+	if json.Unmarshal([]byte(raw), &state) != nil {
+		return false
+	}
+	return state.Model == setting.Model && state.Dim == setting.Dim
 }
 
 func (s *EmbeddingService) Backfill(ctx context.Context, onProgress func(BackfillResult)) (BackfillResult, error) {
@@ -172,6 +193,13 @@ func (s *EmbeddingService) Backfill(ctx context.Context, onProgress func(Backfil
 	}
 	if err := s.ensureReady(ctx, setting); err != nil {
 		return result, err
+	}
+	if pruned, err := s.repo.PruneOrphans(ctx); err != nil {
+		logUtil.GetLogger().Warn("prune orphaned embeddings failed",
+			slog.String("module", "embedding"), logUtil.Err(err))
+	} else if pruned > 0 {
+		logUtil.GetLogger().Info("pruned orphaned embeddings",
+			slog.String("module", "embedding"), slog.Int64("count", pruned))
 	}
 
 	const pageSize = 100
@@ -201,27 +229,28 @@ func (s *EmbeddingService) Backfill(ctx context.Context, onProgress func(Backfil
 		}
 
 		if len(texts) > 0 {
-			vecs, embErr := s.embedder.Embed(ctx, setting, texts)
-			if embErr != nil {
-				logUtil.GetLogger().Error("backfill embed failed", logUtil.Err(embErr))
-				result.Failed += len(texts)
-				lastErr = embErr
-			} else {
-				for i, e := range picked {
-					if upErr := s.repo.Upsert(ctx, &model.EchoEmbedding{
-						EchoID:      e.ID,
-						ContentHash: hashContent(texts[i]),
-						Model:       setting.Model,
-						Dim:         setting.Dim,
-						Content:     e.Content,
-						Username:    e.Username,
-						EchoCreated: e.CreatedAt,
-					}, vecs[i]); upErr != nil {
-						result.Failed++
-					} else {
-						result.Indexed++
-					}
+			vecs, embErr := s.embedBatch(ctx, setting, texts)
+			for i, e := range picked {
+				if vecs[i] == nil {
+					result.Failed++
+					continue
 				}
+				if upErr := s.repo.Upsert(ctx, &model.EchoEmbedding{
+					EchoID:      e.ID,
+					ContentHash: hashContent(texts[i]),
+					Model:       setting.Model,
+					Dim:         setting.Dim,
+					Content:     e.Content,
+					Username:    e.Username,
+					EchoCreated: e.CreatedAt,
+				}, vecs[i]); upErr != nil {
+					result.Failed++
+				} else {
+					result.Indexed++
+				}
+			}
+			if embErr != nil {
+				lastErr = embErr
 			}
 		}
 
@@ -240,4 +269,32 @@ func (s *EmbeddingService) Backfill(ctx context.Context, onProgress func(Backfil
 	}
 
 	return result, nil
+}
+
+// embedBatch embeds texts, returning one vector per input and nil where an
+// input could not be embedded. A batch the provider rejects is retried one
+// input at a time, so a single bad Echo — too long for the model, or tripping
+// a content filter — costs itself rather than the whole page every rebuild.
+func (s *EmbeddingService) embedBatch(ctx context.Context, setting settingModel.EmbeddingSetting, texts []string) ([][]float32, error) {
+	vecs, err := s.embedder.Embed(ctx, setting, texts)
+	if err == nil && len(vecs) == len(texts) {
+		return vecs, nil
+	}
+	logUtil.GetLogger().Warn("backfill batch embed failed, retrying one by one",
+		slog.String("module", "embedding"), slog.Int("size", len(texts)), logUtil.Err(err))
+
+	vecs = make([][]float32, len(texts))
+	var lastErr error
+	for i, t := range texts {
+		if ctx.Err() != nil {
+			return vecs, ctx.Err()
+		}
+		v, oneErr := s.embedder.EmbedOne(ctx, setting, t)
+		if oneErr != nil {
+			lastErr = oneErr
+			continue
+		}
+		vecs[i] = v
+	}
+	return vecs, lastErr
 }

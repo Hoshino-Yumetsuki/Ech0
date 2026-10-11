@@ -19,19 +19,26 @@ func TestResolveTagIDs(t *testing.T) {
 		{ID: "id-travel", Name: "Travel"},
 	}
 	cases := []struct {
-		name  string
-		in    []string
-		wantN int
-		want  []string
+		name    string
+		in      []string
+		wantN   int
+		want    []string
+		wantErr bool
 	}{
-		{"empty input → nil", nil, 0, nil},
-		{"exact match", []string{"读书"}, 1, []string{"id-read"}},
-		{"case-insensitive + trim", []string{"  travel  "}, 1, []string{"id-travel"}},
-		{"unknown ignored", []string{"读书", "不存在"}, 1, []string{"id-read"}},
+		{"empty input → nil", nil, 0, nil, false},
+		{"exact match", []string{"读书"}, 1, []string{"id-read"}, false},
+		{"case-insensitive + trim + hash", []string{"  #travel  "}, 1, []string{"id-travel"}, false},
+		{"unknown refuses instead of widening", []string{"读书", "不存在"}, 0, nil, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := resolveTagIDs(tags, c.in)
+			got, err := resolveTagIDs(tags, c.in, "zh-CN")
+			if (err != nil) != c.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, c.wantErr)
+			}
+			if c.wantErr && !strings.Contains(err.Error(), "不存在") {
+				t.Fatalf("error should name the unknown tag, got %q", err)
+			}
 			if len(got) != c.wantN {
 				t.Fatalf("len = %d, want %d (got %v)", len(got), c.wantN, got)
 			}

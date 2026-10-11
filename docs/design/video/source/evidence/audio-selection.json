@@ -1,0 +1,117 @@
+{
+  "music": {
+    "source": "code-original",
+    "script": "tools/score.py",
+    "duration": 97.5,
+    "bpm": 96,
+    "key": "F major",
+    "sections": {
+      "open": [
+        0,
+        5
+      ],
+      "echo": [
+        5,
+        8.75
+      ],
+      "write": [
+        8.75,
+        22.5
+      ],
+      "land": [
+        22.5,
+        28.75
+      ],
+      "detail": [
+        28.75,
+        41.25
+      ],
+      "stream": [
+        41.25,
+        48.75
+      ],
+      "reach": [
+        48.75,
+        56.25
+      ],
+      "copilot": [
+        56.25,
+        66.25
+      ],
+      "panel": [
+        66.25,
+        83.75
+      ],
+      "own": [
+        83.75,
+        92.5
+      ],
+      "close": [
+        92.5,
+        97.5
+      ]
+    }
+  },
+  "sfx": [
+    {
+      "file": "assets/sfx/click.wav",
+      "role": "select/confirm",
+      "source": "guizang-product-video-skill built-in (assets/audio/sfx, original)",
+      "license": "see skill assets/audio/SOURCE.md"
+    },
+    {
+      "file": "assets/sfx/click-alt.wav",
+      "role": "tag pick, ring hits, mark",
+      "source": "guizang-product-video-skill built-in (assets/audio/sfx, original)",
+      "license": "see skill assets/audio/SOURCE.md"
+    },
+    {
+      "file": "assets/sfx/pop.wav",
+      "role": "appear/popover",
+      "source": "guizang-product-video-skill built-in (assets/audio/sfx, original)",
+      "license": "see skill assets/audio/SOURCE.md"
+    },
+    {
+      "file": "assets/sfx/typing.wav",
+      "role": "typing (typing-x3/x5/x6 are repeats of it)",
+      "source": "guizang-product-video-skill built-in (assets/audio/sfx, original)",
+      "license": "see skill assets/audio/SOURCE.md"
+    },
+    {
+      "file": "assets/sfx/toggle.wav",
+      "role": "theme switch",
+      "source": "guizang-product-video-skill built-in (assets/audio/sfx, original)",
+      "license": "see skill assets/audio/SOURCE.md"
+    },
+    {
+      "file": "assets/sfx/sweep.wav",
+      "role": "first echo ring",
+      "source": "guizang-product-video-skill built-in (assets/audio/sfx, original)",
+      "license": "see skill assets/audio/SOURCE.md"
+    },
+    {
+      "file": "assets/sfx/whoosh.wav",
+      "role": "rail/send",
+      "source": "guizang-product-video-skill built-in (assets/audio/sfx, original)",
+      "license": "see skill assets/audio/SOURCE.md"
+    },
+    {
+      "file": "assets/sfx/success.wav",
+      "role": "post lands",
+      "source": "guizang-product-video-skill built-in (assets/audio/sfx, original)",
+      "license": "see skill assets/audio/SOURCE.md"
+    },
+    {
+      "file": "assets/sfx/resolve.wav",
+      "role": "echo rings",
+      "source": "guizang-product-video-skill built-in (assets/audio/sfx, original)",
+      "license": "see skill assets/audio/SOURCE.md"
+    }
+  ],
+  "fallbackReason": "No recorded SFX library installed locally (no media-use skill / CREDITS.md found); built-in WAVs used for every role. No web download attempted.",
+  "demoMedia": {
+    "file": "public/demo/cats-at-dusk.mp4",
+    "source": "data/files/videos/019ce072_1783148611_6049dd46.mp4 (owner's local instance, used at the user's request)",
+    "license": "owner-provided; confirm rights before public release"
+  }
+}

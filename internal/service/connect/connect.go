@@ -18,9 +18,9 @@ import (
 	model "github.com/lin-snow/ech0/internal/model/connect"
 	coreSetting "github.com/lin-snow/ech0/internal/setting"
 	"github.com/lin-snow/ech0/internal/transaction"
-	"github.com/lin-snow/ech0/internal/util/egress"
 	urlUtil "github.com/lin-snow/ech0/internal/util/url"
 	versionPkg "github.com/lin-snow/ech0/internal/version"
+	"github.com/lin-snow/ech0/pkg/egress"
 	logUtil "github.com/lin-snow/ech0/pkg/log"
 	"github.com/lin-snow/ech0/pkg/viewer"
 	"golang.org/x/sync/singleflight"
@@ -158,7 +158,7 @@ func (connectService *ConnectService) DeleteConnect(ctx context.Context, id stri
 func (connectService *ConnectService) GetConnect() (model.Connect, error) {
 	var connect model.Connect
 
-	setting, err := coreSetting.Get(context.Background(), connectService.durableKV, coreSetting.System)
+	setting, err := coreSetting.System.Get(context.Background(), connectService.durableKV)
 	if err != nil {
 		return connect, err
 	}

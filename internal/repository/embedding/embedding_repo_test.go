@@ -7,6 +7,7 @@ import (
 	"context"
 	"testing"
 
+	echoModel "github.com/lin-snow/ech0/internal/model/echo"
 	model "github.com/lin-snow/ech0/internal/model/embedding"
 	"github.com/lin-snow/ech0/internal/test/helpers"
 	"github.com/lin-snow/ech0/internal/transaction"
@@ -23,15 +24,21 @@ func newEmbeddingRepo(t *testing.T) (*EmbeddingRepository, *gorm.DB) {
 
 func vec4(x float32) []float32 { return []float32{x, 0, 0, 0} }
 
-func seed(t *testing.T, repo *EmbeddingRepository, ctx context.Context, echoID, username string, x float32) {
+// seed indexes an Echo and creates the Echo itself, authored by the user whose
+// ID is author. Search resolves hits against the echos table, so an index row
+// without its Echo is an orphan and never surfaces.
+func seed(t *testing.T, repo *EmbeddingRepository, ctx context.Context, echoID, author string, x float32) {
 	t.Helper()
+	require.NoError(t, repo.getDB(ctx).Save(&echoModel.Echo{
+		ID: echoID, Content: "content-" + echoID, Username: author, UserID: author, CreatedAt: 1000,
+	}).Error)
 	meta := &model.EchoEmbedding{
 		EchoID:      echoID,
 		ContentHash: "h-" + echoID,
 		Model:       "test-model",
 		Dim:         4,
 		Content:     "content-" + echoID,
-		Username:    username,
+		Username:    author,
 		EchoCreated: 1000,
 	}
 	require.NoError(t, repo.Upsert(ctx, meta, vec4(x)))
@@ -150,16 +157,29 @@ func TestEmbeddingRepository_Upsert(t *testing.T) {
 		assert.InDelta(t, 9.0, res[0].Distance, 0.001)
 	})
 
-	t.Run("propagates vec write error when vec table is absent", func(t *testing.T) {
-		repo2, _ := newEmbeddingRepo(t)
+	t.Run("vec write error rolls the whole write back", func(t *testing.T) {
+		repo2, db2 := newEmbeddingRepo(t)
 		ctx2 := context.Background()
+		require.NoError(t, db2.Create(&echoModel.Echo{ID: "e-novec", Content: "c", UserID: "u"}).Error)
 		meta := &model.EchoEmbedding{EchoID: "e-novec", Username: "u", Dim: 4}
 		err := repo2.Upsert(ctx2, meta, vec4(1))
 		require.Error(t, err)
 
 		_, ok, gerr := repo2.GetMeta(ctx2, "e-novec")
 		require.NoError(t, gerr)
-		assert.True(t, ok)
+		assert.False(t, ok, "meta without its vector is a half-indexed Echo")
+	})
+
+	t.Run("an Echo deleted before its vector arrives is not indexed", func(t *testing.T) {
+		repo3, db3 := newEmbeddingRepo(t)
+		ctx3 := context.Background()
+		require.NoError(t, repo3.EnsureVecTable(ctx3, 4))
+		require.NoError(t, repo3.Upsert(ctx3, &model.EchoEmbedding{EchoID: "e-gone", Dim: 4}, vec4(1)))
+
+		_, ok, err := repo3.GetMeta(ctx3, "e-gone")
+		require.NoError(t, err)
+		assert.False(t, ok)
+		assert.Equal(t, 0, vecTotal(t, db3))
 	})
 }
 
@@ -356,4 +376,28 @@ func assertAscending(t *testing.T, res []model.SearchResult) {
 	for i := 1; i < len(res); i++ {
 		assert.LessOrEqual(t, res[i-1].Distance, res[i].Distance, "results must be in ascending distance order")
 	}
+}
+
+func TestEmbeddingRepository_SearchIgnoresOrphansAndRenames(t *testing.T) {
+	repo, db := newEmbeddingRepo(t)
+	ctx := context.Background()
+	require.NoError(t, repo.EnsureVecTable(ctx, 4))
+
+	seed(t, repo, ctx, "kept", "alice", 1)
+	seed(t, repo, ctx, "gone", "alice", 2)
+	require.NoError(t, db.Delete(&echoModel.Echo{ID: "gone"}).Error)
+	require.NoError(t, db.Model(&echoModel.Echo{}).Where("id = ?", "kept").
+		Updates(map[string]any{"username": "alice-renamed", "content": "edited"}).Error)
+
+	res, err := repo.Search(ctx, vec4(0), 5, "alice")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"kept"}, ids(res), "a deleted Echo's leftover vector must not surface")
+	assert.Equal(t, "edited", res[0].Content, "results read the Echo as it is now")
+	assert.Equal(t, "alice-renamed", res[0].Username)
+
+	n, err := repo.PruneOrphans(ctx)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, n)
+	assert.Equal(t, 0, vecRowCount(t, db, "gone"))
+	assert.Equal(t, 1, vecRowCount(t, db, "kept"))
 }

@@ -57,7 +57,7 @@ func mapJobToReindexStatus(jb jobModel.Job) ReindexStatusResponse {
 }
 
 func (embeddingHandler *EmbeddingHandler) Reindex(ctx context.Context, _ *ReindexInput) (ReindexOutput, error) {
-	jb, err := embeddingHandler.jobManager.Submit(ctx, jobModel.TypeReindex, nil)
+	jb, err := embeddingHandler.jobManager.Submit(ctx, jobModel.Reindex, struct{}{})
 	if err != nil {
 		return ReindexOutput{}, err
 	}
@@ -65,7 +65,7 @@ func (embeddingHandler *EmbeddingHandler) Reindex(ctx context.Context, _ *Reinde
 }
 
 func (embeddingHandler *EmbeddingHandler) ReindexStatus(ctx context.Context, _ *ReindexStatusInput) (ReindexOutput, error) {
-	jb, err := embeddingHandler.jobManager.Get(ctx, jobModel.TypeReindex)
+	jb, err := embeddingHandler.jobManager.Get(ctx, jobModel.Reindex)
 	if errors.Is(err, job.ErrNotFound) {
 		return commonModel.OK(ReindexStatusResponse{Status: reindexStatusIdle}), nil
 	}
@@ -76,8 +76,8 @@ func (embeddingHandler *EmbeddingHandler) ReindexStatus(ctx context.Context, _ *
 }
 
 func (embeddingHandler *EmbeddingHandler) CancelReindex(ctx context.Context, _ *CancelReindexInput) (ReindexOutput, error) {
-	_ = embeddingHandler.jobManager.Cancel(jobModel.TypeReindex)
-	jb, err := embeddingHandler.jobManager.Get(ctx, jobModel.TypeReindex)
+	_ = embeddingHandler.jobManager.Cancel(jobModel.Reindex)
+	jb, err := embeddingHandler.jobManager.Get(ctx, jobModel.Reindex)
 	if errors.Is(err, job.ErrNotFound) {
 		return commonModel.OK(ReindexStatusResponse{Status: reindexStatusIdle}), nil
 	}

@@ -83,9 +83,9 @@ func (m *Manager) resolveStorageConfig(ctx context.Context) config.StorageConfig
 
 func (m *Manager) currentS3Setting(ctx context.Context) settingModel.S3Setting {
 	if m.durableKV == nil {
-		return coreSetting.S3.Default()
+		return coreSetting.S3.Pristine()
 	}
-	s3, _ := coreSetting.Get(ctx, m.durableKV, coreSetting.S3)
+	s3, _ := coreSetting.S3.Get(ctx, m.durableKV)
 	return s3
 }
 

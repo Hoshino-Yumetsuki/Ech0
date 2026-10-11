@@ -16,12 +16,12 @@ import (
 
 type UserRepository struct {
 	db    func() *gorm.DB
-	cache cache.ICache[string, any]
+	cache *cache.Cache
 }
 
 func NewUserRepository(
 	dbProvider func() *gorm.DB,
-	cache cache.ICache[string, any],
+	cache *cache.Cache,
 ) *UserRepository {
 	return &UserRepository{
 		db:    dbProvider,
@@ -38,9 +38,8 @@ func (userRepository *UserRepository) getDB(ctx context.Context) *gorm.DB {
 
 func (userRepository *UserRepository) GetUserByUsername(ctx context.Context, username string) (model.User, error) {
 	cacheKey := GetUsernameKey(username)
-	return cache.ReadThroughTypedUnlessTx[model.User](
+	return userRepository.cache.ReadThroughUnlessTx(
 		ctx,
-		userRepository.cache,
 		cacheKey,
 		1,
 		func(ctx context.Context) (model.User, error) {
@@ -94,9 +93,8 @@ func (userRepository *UserRepository) UpsertLocalAuth(ctx context.Context, local
 
 func (userRepository *UserRepository) GetUserByID(ctx context.Context, id string) (model.User, error) {
 	cacheKey := GetUserIDKey(id)
-	return cache.ReadThroughTypedUnlessTx[model.User](
+	return userRepository.cache.ReadThroughUnlessTx(
 		ctx,
-		userRepository.cache,
 		cacheKey,
 		1,
 		func(ctx context.Context) (model.User, error) {
@@ -118,9 +116,8 @@ func (userRepository *UserRepository) GetUserByID(ctx context.Context, id string
 
 func (userRepository *UserRepository) GetOwner(ctx context.Context) (model.User, error) {
 	cacheKey := GetOwnerKey()
-	return cache.ReadThroughTypedUnlessTx[model.User](
+	return userRepository.cache.ReadThroughUnlessTx(
 		ctx,
-		userRepository.cache,
 		cacheKey,
 		1,
 		func(ctx context.Context) (model.User, error) {

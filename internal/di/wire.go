@@ -8,8 +8,9 @@
 package di
 
 import (
+	"context"
+
 	"github.com/google/wire"
-	"github.com/lin-snow/ech0/internal/app"
 	"github.com/lin-snow/ech0/internal/cache"
 	"github.com/lin-snow/ech0/internal/database"
 	eventbus "github.com/lin-snow/ech0/internal/event/bus"
@@ -27,17 +28,43 @@ import (
 	"github.com/lin-snow/ech0/internal/service"
 	copilotService "github.com/lin-snow/ech0/internal/service/copilot"
 	userService "github.com/lin-snow/ech0/internal/service/user"
+	"github.com/lin-snow/ech0/internal/setting"
 	"github.com/lin-snow/ech0/internal/storage"
 	"github.com/lin-snow/ech0/internal/task"
 	"github.com/lin-snow/ech0/internal/task/scheduled"
 	"github.com/lin-snow/ech0/internal/transaction"
 	"github.com/lin-snow/ech0/internal/visitor"
 	"github.com/lin-snow/ech0/internal/webhook"
+	"github.com/lin-snow/ech0/pkg/app"
 	"github.com/lin-snow/ech0/pkg/busen"
 	"gorm.io/gorm"
 )
 
-var AppSet = app.ProviderSet
+var AppSet = wire.NewSet(ProvideApp)
+
+// ProvideApp composes Ech0's runtime on the generic app lifecycle: components
+// start in order job → task → server; settings are seeded and event
+// subscriptions registered before any of them, and torn down after all stop.
+func ProvideApp(
+	registrar *eventbus.EventRegistrar,
+	jobManager *job.Manager,
+	taskManager *task.Manager,
+	httpServer *server.Server,
+	durableKV kvstore.Store,
+) *app.App {
+	return app.New(
+		app.Components(jobManager, taskManager, httpServer),
+		app.BeforeStart(func(ctx context.Context) error {
+			if err := setting.Seed(ctx, durableKV); err != nil {
+				return err
+			}
+			return registrar.Register()
+		}),
+		app.AfterStop(func(context.Context) error {
+			return registrar.Stop()
+		}),
+	)
+}
 
 var VisitorSet = wire.NewSet(visitor.NewTracker)
 
@@ -48,9 +75,9 @@ func ProvideJobManager(
 	export *jobRunner.ExportRunner,
 ) *job.Manager {
 	m := job.NewManager(repo)
-	m.Register(jobModel.TypeReindex, job.Adapt(reindex.Run))
-	m.Register(jobModel.TypeMigration, job.Adapt(migration.Run))
-	m.Register(jobModel.TypeExport, job.Adapt(export.Run))
+	m.Register(jobModel.Reindex, reindex.Run)
+	m.Register(jobModel.Migration, migration.Run)
+	m.Register(jobModel.Export, export.Run)
 	return m
 }
 
@@ -210,7 +237,7 @@ func BuildApp() (*app.App, error) {
 func BuildEventRegistrar(
 	dbProvider func() *gorm.DB,
 	ebProvider func() *busen.Bus,
-	appCache cache.ICache[string, any],
+	appCache *cache.Cache,
 	tx transaction.Transactor,
 ) (*eventbus.EventRegistrar, error) {
 	wire.Build(EventSet)
@@ -219,7 +246,7 @@ func BuildEventRegistrar(
 
 func BuildHandlers(
 	dbProvider func() *gorm.DB,
-	appCache cache.ICache[string, any],
+	appCache *cache.Cache,
 	tx transaction.Transactor,
 	ebProvider func() *busen.Bus,
 	tracker *visitor.Tracker,
@@ -232,7 +259,7 @@ func BuildHandlers(
 
 func BuildJobManager(
 	dbProvider func() *gorm.DB,
-	appCache cache.ICache[string, any],
+	appCache *cache.Cache,
 	storageManager *storage.Manager,
 	ebProvider func() *busen.Bus,
 	tx transaction.Transactor,
@@ -255,7 +282,7 @@ func BuildJobManager(
 
 func BuildMiddlewares(
 	dbProvider func() *gorm.DB,
-	appCache cache.ICache[string, any],
+	appCache *cache.Cache,
 ) (*middleware.Deps, error) {
 	wire.Build(MiddlewareSet)
 	return &middleware.Deps{}, nil
@@ -276,7 +303,7 @@ func BuildServer() (*server.Server, error) {
 
 func BuildTasker(
 	dbProvider func() *gorm.DB,
-	appCache cache.ICache[string, any],
+	appCache *cache.Cache,
 	tx transaction.Transactor,
 	ebProvider func() *busen.Bus,
 	tracker *visitor.Tracker,

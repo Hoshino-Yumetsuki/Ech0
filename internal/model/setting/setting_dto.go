@@ -89,12 +89,13 @@ type SnapshotScheduleDto struct {
 }
 
 type AgentSettingDto struct {
-	Enable        bool   `json:"enable"`
-	Protocol      string `json:"protocol"`
-	Model         string `json:"model"`
-	ApiKey        string `json:"api_key"`
-	Prompt        string `json:"prompt"`
-	BaseURL       string `json:"base_url"`
-	Multimodal    bool   `json:"multimodal"`
-	ContextWindow int    `json:"context_window"`
+	Enable        bool     `json:"enable"`
+	Protocol      string   `json:"protocol"`
+	Model         string   `json:"model"`
+	ApiKey        string   `json:"api_key"`
+	Prompt        string   `json:"prompt"`
+	BaseURL       string   `json:"base_url"`
+	Multimodal    bool     `json:"multimodal"`
+	ContextWindow int      `json:"context_window"`
+	Temperature   *float64 `json:"temperature,omitempty" nullable:"true" minimum:"0" maximum:"2" doc:"采样温度；留空则不发送，使用模型默认值。是否支持以模型官方文档为准"`
 }

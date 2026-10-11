@@ -27,7 +27,7 @@ func TestMapJobToReindexStatus(t *testing.T) {
 		{
 			name: "all-fields-passthrough-with-payload",
 			in: jobModel.Job{
-				Type:       jobModel.TypeReindex,
+				Type:       string(jobModel.Reindex),
 				Status:     jobModel.StatusRunning,
 				Phase:      "embedding",
 				Error:      "",
@@ -102,7 +102,7 @@ func TestReindexStatus_NoJobSynthesizesIdle(t *testing.T) {
 func TestReindexStatus_ExistingJobMapped(t *testing.T) {
 	h, repo := newEmbeddingHandlerWithDB(t)
 	require.NoError(t, repo.Upsert(context.Background(), &jobModel.Job{
-		Type:      jobModel.TypeReindex,
+		Type:      string(jobModel.Reindex),
 		Status:    jobModel.StatusRunning,
 		Phase:     "embedding",
 		Payload:   `{"total":10}`,
@@ -133,7 +133,7 @@ func TestCancelReindex_NoJobSynthesizesIdle(t *testing.T) {
 func TestCancelReindex_TerminalRowMapped(t *testing.T) {
 	h, repo := newEmbeddingHandlerWithDB(t)
 	require.NoError(t, repo.Upsert(context.Background(), &jobModel.Job{
-		Type:   jobModel.TypeReindex,
+		Type:   string(jobModel.Reindex),
 		Status: jobModel.StatusSuccess,
 		Phase:  "done",
 	}))

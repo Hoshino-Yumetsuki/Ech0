@@ -8,66 +8,44 @@ import (
 	"fmt"
 
 	"github.com/lin-snow/ech0/internal/transaction"
-	"golang.org/x/sync/singleflight"
 )
 
-var readThroughGroup singleflight.Group
-
-func ReadThroughTypedUnlessTx[T any](
+// ReadThroughUnlessTx bypasses the cache inside a transaction, so reads observe
+// uncommitted writes and never populate the cache with them.
+func (c *Cache) ReadThroughUnlessTx[T any](
 	ctx context.Context,
-	c ICache[string, any],
 	key string,
 	cost int64,
-	txLoader func(context.Context) (T, error),
-	loader func() (T, error),
+	txLoad func(context.Context) (T, error),
+	load func() (T, error),
 ) (T, error) {
 	if transaction.HasTx(ctx) {
-		return txLoader(ctx)
+		return txLoad(ctx)
 	}
-
-	return ReadThroughTyped(c, key, cost, loader)
+	return c.ReadThrough(key, cost, load)
 }
 
-func ReadThroughTyped[T any](
-	c ICache[string, any],
-	key string,
-	cost int64,
-	loader func() (T, error),
-) (T, error) {
-	return ReadThroughTypedWithStore(c, key, func(value T) {
+func (c *Cache) ReadThrough[T any](key string, cost int64, load func() (T, error)) (T, error) {
+	return c.ReadThroughWithStore(key, func(value T) {
 		c.Set(key, value, cost)
-	}, loader)
+	}, load)
 }
 
-func ReadThroughTypedWithStore[T any](
-	c ICache[string, any],
-	key string,
-	store func(value T),
-	loader func() (T, error),
-) (T, error) {
-	if cached, found, err := c.Get(key); err != nil {
-		var zero T
-		return zero, err
-	} else if found {
-		if typed, ok := cached.(T); ok {
-			return typed, nil
-		}
+// ReadThroughWithStore returns the cached T for key, or loads it once across
+// concurrent callers and hands the result to store.
+func (c *Cache) ReadThroughWithStore[T any](key string, store func(T), load func() (T, error)) (T, error) {
+	if cached, found, err := c.lookup[T](key); err != nil || found {
+		return cached, err
 	}
 
-	loaded, err, _ := readThroughGroup.Do(key, func() (any, error) {
-		if cached, found, cacheErr := c.Get(key); cacheErr != nil {
-			return nil, cacheErr
-		} else if found {
-			if typed, ok := cached.(T); ok {
-				return typed, nil
-			}
+	loaded, err, _ := c.loads.Do(key, func() (any, error) {
+		if cached, found, err := c.lookup[T](key); err != nil || found {
+			return cached, err
 		}
-
-		value, loadErr := loader()
-		if loadErr != nil {
-			return nil, loadErr
+		value, err := load()
+		if err != nil {
+			return nil, err
 		}
-
 		store(value)
 		return value, nil
 	})
@@ -84,22 +62,20 @@ func ReadThroughTypedWithStore[T any](
 	return typed, nil
 }
 
-func WriteAndPopulate(
-	c ICache[string, any],
-	key string,
-	value any,
-	cost int64,
-	writer func() error,
-) error {
-	if err := writer(); err != nil {
-		return err
-	}
-	c.Set(key, value, cost)
-	return nil
-}
-
-func InvalidateKeys(c ICache[string, any], keys ...string) {
+func (c *Cache) Invalidate(keys ...string) {
 	for _, key := range keys {
 		c.Delete(key)
 	}
+}
+
+// lookup reports a hit only when the cached value holds a T; an entry of any
+// other type is treated as a miss.
+func (c *Cache) lookup[T any](key string) (T, bool, error) {
+	var zero T
+	cached, found, err := c.Get(key)
+	if err != nil || !found {
+		return zero, false, err
+	}
+	typed, ok := cached.(T)
+	return typed, ok, nil
 }

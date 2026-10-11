@@ -78,6 +78,25 @@
     </div>
 
     <div class="mb-4">
+      <h2 class="font-semibold mb-1.5">{{ t('agentSetting.temperature') }}</h2>
+      <span v-if="!editMode" class="block truncate opacity-80">
+        {{ AgentSetting.temperature ?? t('agentSetting.temperatureDefault') }}
+      </span>
+      <template v-else>
+        <BaseInput
+          v-model="temperatureRaw"
+          type="text"
+          inputmode="decimal"
+          :placeholder="t('agentSetting.temperaturePlaceholder')"
+          class="w-full"
+          @input="onTemperatureInput"
+          @blur="onTemperatureBlur"
+        />
+        <p class="text-xs opacity-70 mt-1">{{ t('agentSetting.temperatureHint') }}</p>
+      </template>
+    </div>
+
+    <div class="mb-4">
       <h2 class="font-semibold mb-1.5">{{ t('agentSetting.prompt') }}</h2>
       <span v-if="!editMode" class="block truncate opacity-80">
         {{ AgentSetting.prompt.length === 0 ? t('commonUi.none') : AgentSetting.prompt }}
@@ -149,6 +168,31 @@ const onContextWindowInput = () => {
 }
 const onContextWindowBlur = () => {
   contextWindowRaw.value = formatTokenSize(AgentSetting.value.context_window)
+}
+
+// Empty means "not sent": the model runs at its own default, which is the only
+// value every model accepts. Anything that is not a number in 0–2 is treated
+// as empty rather than sent to fail at the provider.
+const temperatureRaw = ref('')
+watch(
+  () => AgentSetting.value.temperature,
+  (value) => {
+    temperatureRaw.value = value === undefined ? '' : String(value)
+  },
+  { immediate: true },
+)
+const parseTemperature = (raw: string): number | undefined => {
+  const text = raw.trim()
+  if (text === '') return undefined
+  const value = Number(text)
+  return Number.isFinite(value) && value >= 0 && value <= 2 ? value : undefined
+}
+const onTemperatureInput = () => {
+  AgentSetting.value.temperature = parseTemperature(temperatureRaw.value)
+}
+const onTemperatureBlur = () => {
+  const value = AgentSetting.value.temperature
+  temperatureRaw.value = value === undefined ? '' : String(value)
 }
 
 const agentProtocolOptions = computed<{ label: string; value: AgentProtocol }[]>(() => [

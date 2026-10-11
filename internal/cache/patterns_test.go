@@ -5,7 +5,6 @@ package cache
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -20,8 +19,8 @@ type memCache struct {
 	data map[string]any
 }
 
-func newMemCache() *memCache {
-	return &memCache{data: make(map[string]any)}
+func newMemCache() *Cache {
+	return New(&memCache{data: make(map[string]any)})
 }
 
 func (m *memCache) Set(key string, value any, _ int64) bool {
@@ -57,7 +56,7 @@ func TestReadThroughTyped(t *testing.T) {
 	c := newMemCache()
 	loads := 0
 
-	v, err := ReadThroughTyped[string](c, "k", 1, func() (string, error) {
+	v, err := c.ReadThrough("k", 1, func() (string, error) {
 		loads++
 		return "v", nil
 	})
@@ -68,7 +67,7 @@ func TestReadThroughTyped(t *testing.T) {
 		t.Fatalf("unexpected first load result, v=%q loads=%d", v, loads)
 	}
 
-	v, err = ReadThroughTyped[string](c, "k", 1, func() (string, error) {
+	v, err = c.ReadThrough("k", 1, func() (string, error) {
 		loads++
 		return "v2", nil
 	})
@@ -80,30 +79,12 @@ func TestReadThroughTyped(t *testing.T) {
 	}
 }
 
-func TestWriteAndPopulate(t *testing.T) {
-	c := newMemCache()
-
-	err := WriteAndPopulate(c, "k", "v", 1, func() error { return nil })
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	got, ok, err := c.Get("k")
-	if err != nil || !ok || got.(string) != "v" {
-		t.Fatalf("write and populate failed, ok=%v err=%v got=%v", ok, err, got)
-	}
-
-	err = WriteAndPopulate(c, "k2", "v2", 1, func() error { return errors.New("boom") })
-	if err == nil {
-		t.Fatalf("expected writer error")
-	}
-}
-
-func TestInvalidateKeys(t *testing.T) {
+func TestInvalidate(t *testing.T) {
 	c := newMemCache()
 	c.Set("a", 1, 1)
 	c.Set("b", 2, 1)
 
-	InvalidateKeys(c, "a", "b")
+	c.Invalidate("a", "b")
 
 	if _, ok, _ := c.Get("a"); ok {
 		t.Fatalf("key a should be invalidated")
@@ -120,7 +101,7 @@ func TestReadThroughTypedSingleflight(t *testing.T) {
 
 	for range 20 {
 		wg.Go(func() {
-			v, err := ReadThroughTyped[string](c, "shared", 1, func() (string, error) {
+			v, err := c.ReadThrough("shared", 1, func() (string, error) {
 				atomic.AddInt32(&calls, 1)
 				time.Sleep(30 * time.Millisecond)
 				return "value", nil
@@ -148,9 +129,8 @@ func TestReadThroughTypedUnlessTxBypassesCache(t *testing.T) {
 	ctx := context.WithValue(context.Background(), transaction.TxKey, &gorm.DB{})
 	calls := 0
 
-	v, err := ReadThroughTypedUnlessTx[string](
+	v, err := c.ReadThroughUnlessTx(
 		ctx,
-		c,
 		"k",
 		1,
 		func(context.Context) (string, error) {
@@ -170,5 +150,18 @@ func TestReadThroughTypedUnlessTxBypassesCache(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("expected tx loader called once, got %d", calls)
+	}
+}
+
+func TestReadThroughTypeMismatchIsMiss(t *testing.T) {
+	c := newMemCache()
+	c.Set("k", 42, 1)
+
+	v, err := c.ReadThrough("k", 1, func() (string, error) { return "loaded", nil })
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v != "loaded" {
+		t.Fatalf("expected mismatched entry to reload, got %q", v)
 	}
 }

@@ -11,7 +11,6 @@ import (
 	echoModel "github.com/lin-snow/ech0/internal/model/echo"
 	embeddingModel "github.com/lin-snow/ech0/internal/model/embedding"
 	fileModel "github.com/lin-snow/ech0/internal/model/file"
-	settingModel "github.com/lin-snow/ech0/internal/model/setting"
 	"github.com/lin-snow/ech0/internal/storage"
 )
 
@@ -41,7 +40,7 @@ func TestEnrichHits_MediaCategoriesToFiles(t *testing.T) {
 	s := &CopilotService{echoService: svc}
 
 	results := []embeddingModel.SearchResult{{EchoID: "e1"}}
-	_, images := s.enrichHits(context.Background(), results, false)
+	_, images := s.enrichHits(context.Background(), results, false, nil)
 
 	gotCats := make([]string, 0, len(results[0].Files))
 	for _, f := range results[0].Files {
@@ -124,16 +123,33 @@ func TestLoadImagePart_NonStorageBranches(t *testing.T) {
 	})
 }
 
-func TestAggregateBudgetTokens(t *testing.T) {
-	def := aggregateBudgetTokens(settingModel.AgentSetting{ContextWindow: 0})
-	if def <= minAggregateBudget {
-		t.Fatalf("default-window budget should exceed the floor, got %d", def)
+func TestPlanContext(t *testing.T) {
+	const fixed = 3_000 // system prompt + tool declarations
+
+	for _, window := range []int{0, 8_000, 32_000, 128_000, 1_000_000} {
+		p := planContext(window, fixed)
+		w := window
+		if w == 0 {
+			w = defaultContextWindow
+		}
+		if p.Input >= w {
+			t.Fatalf("window %d: input %d leaves no room for output", window, p.Input)
+		}
+		if fixed+p.History+p.Material > p.Input && p.Material > minAggregateBudget {
+			t.Fatalf("window %d: history %d + material %d + fixed %d exceed input %d — the loop would trim the summary",
+				window, p.History, p.Material, fixed, p.Input)
+		}
 	}
-	if got := aggregateBudgetTokens(settingModel.AgentSetting{ContextWindow: 1000}); got != minAggregateBudget {
-		t.Fatalf("tiny window should clamp to floor %d, got %d", minAggregateBudget, got)
+
+	if planContext(0, fixed).Input >= 256_000 {
+		t.Fatalf("an unset window must not be assumed huge")
 	}
-	if chatContextBudgetTokens(settingModel.AgentSetting{ContextWindow: 1000}) != minAggregateBudget {
-		t.Fatalf("chat budget should mirror aggregate budget")
+	small := planContext(1_000, fixed)
+	if small.Material != minAggregateBudget {
+		t.Fatalf("a window smaller than the prompt should floor the material budget, got %d", small.Material)
+	}
+	if big := planContext(1_000_000, fixed); big.History != maxHistoryTokens {
+		t.Fatalf("history should cap at %d, got %d", maxHistoryTokens, big.History)
 	}
 }
 

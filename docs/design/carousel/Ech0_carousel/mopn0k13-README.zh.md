@@ -4,7 +4,7 @@
 
 # Ech0
 
-[预览地址](https://memo.vaaat.com/) · [官网与文档](https://www.ech0.app/) · [发布页面](https://lin-snow.github.io/Ech0/) · [Ech0 Hub](https://hub.ech0.app/)
+[预览地址](https://memo.sn0w.fyi/) · [官网与文档](https://www.ech0.app/) · [发布页面](https://lin-snow.github.io/Ech0/) · [Ech0 Hub](https://hub.ech0.app/)
 
 <a title="en-US" href="./README.md"><img src="https://img.shields.io/badge/-English-545759?style=for-the-badge" alt="English"></a> <img src="https://img.shields.io/badge/-简体中文-F54A00?style=for-the-badge" alt="简体中文"> <a title="de" href="./README.de.md"><img src="https://img.shields.io/badge/-Deutsch-545759?style=for-the-badge" alt="Deutsch"></a> <a title="ja" href="./README.ja.md"><img src="https://img.shields.io/badge/-日本語-545759?style=for-the-badge" alt="日本語"></a>
 
@@ -191,7 +191,7 @@ docker run -d \
    Ech0 当前采用轻量权限模型（Owner / Admin / 普通用户），目标是降低管理复杂度并保持日常使用流畅。后续会根据社区反馈持续迭代。
 
 8. **为什么别人无法显示自己的 Connect 头像？**
-   要使别人显示自己的 Connect 头像需要在 `系统设置-服务地址` 中填入自己当前的实例地址，比如 `https://memo.vaaat.com`（注意：这里填的链接需要带上 http 或 https）。
+   要使别人显示自己的 Connect 头像需要在 `系统设置-服务地址` 中填入自己当前的实例地址，比如 `https://memo.sn0w.fyi/`（注意：这里填的链接需要带上 http 或 https）。
 
 9. **设置中的 MetingAPI 项是什么？**
    这是音乐卡片解析所使用的 API 地址。你可以填写自建或可信的解析服务；未配置时会使用系统默认解析地址。建议在生产环境中优先使用你可控的服务端点。

@@ -61,8 +61,7 @@ func newFixture(t *testing.T) *fixture {
 	require.NoError(t, db.Create(&alice).Error)
 
 	kv := kvstore.NewMemory()
-	require.NoError(t, coreSetting.Set(context.Background(), kv, coreSetting.System,
-		settingModel.SystemSetting{SiteTitle: "Existing Title"}))
+	require.NoError(t, coreSetting.System.Set(context.Background(), kv, settingModel.SystemSetting{SiteTitle: "Existing Title"}))
 
 	return &fixture{
 		db:      db,
@@ -291,7 +290,7 @@ func TestRun_LandsCapsuleVerbatim(t *testing.T) {
 	require.Zero(t, orphan)
 
 	require.ElementsMatch(t, []string{"server_name", "footer_link"}, res.SiteFieldsFilled)
-	sys, err := coreSetting.Get(context.Background(), f.deps.KV, coreSetting.System)
+	sys, err := coreSetting.System.Get(context.Background(), f.deps.KV)
 	require.NoError(t, err)
 	require.Equal(t, "Existing Title", sys.SiteTitle, "已配置项不被胶囊覆盖")
 	require.Equal(t, "capsule-instance", sys.ServerName)
@@ -347,7 +346,7 @@ func TestRun_DryRunWritesNothing(t *testing.T) {
 	_, err = f.deps.Selector.Get(context.Background(), storage.StorageTypeLocal, "pic.png")
 	require.Error(t, err)
 
-	sys, err := coreSetting.Get(context.Background(), f.deps.KV, coreSetting.System)
+	sys, err := coreSetting.System.Get(context.Background(), f.deps.KV)
 	require.NoError(t, err)
 	require.Equal(t, "Existing Title", sys.SiteTitle)
 	require.Empty(t, sys.ServerName, "dry-run 不得写 KV：仓储写完会刷进程内缓存，回滚兜不住")
@@ -460,7 +459,7 @@ func TestRun_FreshInstanceTakesCapsuleSiteIdentity(t *testing.T) {
 	f := newFixture(t)
 	f.deps.KV = kvstore.NewMemory()
 
-	pristine := coreSetting.System.Default()
+	pristine := coreSetting.System.Pristine()
 	require.NotEmpty(t, pristine.SiteTitle, "前提：默认站点标题非空，否则本用例守不住任何东西")
 
 	manifest := fullManifest()
@@ -471,7 +470,7 @@ func TestRun_FreshInstanceTakesCapsuleSiteIdentity(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, res.SiteFieldsFilled, "site_title")
 
-	sys, err := coreSetting.Get(context.Background(), f.deps.KV, coreSetting.System)
+	sys, err := coreSetting.System.Get(context.Background(), f.deps.KV)
 	require.NoError(t, err)
 	require.Equal(t, "搬家后的站点", sys.SiteTitle)
 }

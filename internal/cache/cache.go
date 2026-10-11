@@ -6,17 +6,25 @@ package cache
 import (
 	"time"
 
-	"github.com/dgraph-io/ristretto/v2"
+	"golang.org/x/sync/singleflight"
 )
 
-type ICache[K ristretto.Key, V any] interface {
-	Set(key K, value V, cost int64) bool
-	SetWithTTL(key K, value V, cost int64, ttl time.Duration) bool
-	Get(key K) (V, bool, error)
-	Delete(key K)
+// Backend is the raw key-value store the application cache sits on.
+type Backend interface {
+	Set(key string, value any, cost int64) bool
+	SetWithTTL(key string, value any, cost int64, ttl time.Duration) bool
+	Get(key string) (any, bool, error)
+	Delete(key string)
 	Close() error
 }
 
-func NewCache[K ristretto.Key, V any]() (ICache[K, V], error) {
-	return NewRistrettoCache[K, V](1000000, 1000000, 100)
+// Cache is the application cache: the raw Backend operations plus typed
+// read-through loading, coalesced per key. It must not be copied.
+type Cache struct {
+	Backend
+	loads singleflight.Group
+}
+
+func New(backend Backend) *Cache {
+	return &Cache{Backend: backend}
 }

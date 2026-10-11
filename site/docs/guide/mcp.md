@@ -101,19 +101,19 @@ description: Model Context Protocol、/mcp 端点、令牌与 Tools 能力
 
 ### 帖子与标签（`echo:read` / `echo:write`）
 
-| 类型     | 名称                                          | 说明                    |
-| -------- | --------------------------------------------- | ----------------------- |
-| Tool     | `search_posts`                                | 关键词 / 标签搜索，分页 |
-| Tool     | `get_post`                                    | 按 UUID 取单篇          |
-| Tool     | `get_today_posts`                             | 当日帖子（可带时区）    |
-| Tool     | `list_tags`                                   | 标签列表与计数          |
-| Tool     | `create_post` / `update_post` / `delete_post` | 创建 / 更新 / 删除      |
-| Tool     | `like_post`                                   | 点赞                    |
-| Tool     | `delete_tag`                                  | 删除标签并解除关联      |
-| Resource | `ech0://posts/recent`                         | 最近帖子                |
-| Resource Template | `ech0://posts/{id}`                  | 单篇（见 `resources/templates/list`） |
-| Resource | `ech0://tags`                                 | 全部标签                |
-| Resource | `ech0://stats/heatmap`                        | 热力图数据              |
+| 类型              | 名称                                          | 说明                                  |
+| ----------------- | --------------------------------------------- | ------------------------------------- |
+| Tool              | `search_posts`                                | 关键词 / 标签搜索，分页               |
+| Tool              | `get_post`                                    | 按 UUID 取单篇                        |
+| Tool              | `get_today_posts`                             | 当日帖子（可带时区）                  |
+| Tool              | `list_tags`                                   | 标签列表与计数                        |
+| Tool              | `create_post` / `update_post` / `delete_post` | 创建 / 更新 / 删除                    |
+| Tool              | `like_post`                                   | 点赞                                  |
+| Tool              | `delete_tag`                                  | 删除标签并解除关联                    |
+| Resource          | `ech0://posts/recent`                         | 最近帖子                              |
+| Resource Template | `ech0://posts/{id}`                           | 单篇（见 `resources/templates/list`） |
+| Resource          | `ech0://tags`                                 | 全部标签                              |
+| Resource          | `ech0://stats/heatmap`                        | 热力图数据                            |
 
 ### 评论（`comment:read` / `comment:write`）
 

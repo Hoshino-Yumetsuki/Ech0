@@ -157,7 +157,7 @@ func TestJobToDTO(t *testing.T) {
 		require.NoError(t, err)
 
 		jb := jobModel.Job{
-			Type:       jobModel.TypeMigration,
+			Type:       string(jobModel.Migration),
 			Status:     jobModel.StatusRunning,
 			Phase:      migratorModel.MigrationPhaseLoading,
 			Error:      "boom",
@@ -207,7 +207,7 @@ func TestJobExportToDTO(t *testing.T) {
 		started := int64(10)
 		finished := int64(20)
 		jb := jobModel.Job{
-			Type:       jobModel.TypeExport,
+			Type:       string(jobModel.Export),
 			Status:     jobModel.StatusSuccess,
 			Phase:      migratorModel.ExportPhaseCompleted,
 			Error:      "",

@@ -260,9 +260,11 @@ emit AgentDone   // 到达 maxRounds 仍未收尾，强制结束（已产出的�
 
 | 护栏 | 默认 | 作用 |
 |---|---|---|
-| `maxRounds` | 3 | 工具轮数上限，防死循环 |
+| `maxRounds` | 20（`ECH0_AGENT_MAX_ROUNDS`；包内兜底 3） | 工具轮数上限，防死循环；用尽后以 `tool_choice: none` 强制收尾 |
 | 查询去重 | 同 turn 内同 `(name,args)` 不重复执行 | 防模型反复搜同一词烧 token |
-| token 预算 | 软上限（可由 `ECH0_CHAT_*` 配） | 累积上下文超限时丢最旧 tool 结果 |
+| token 预算 | `MaxContextTokens`（§18.3） | 累积上下文超限时按 `trimContext` 顺序让步；首轮后以 provider 回报的真实 input tokens 为锚 |
+| 超窗重试 | 1 次 | provider 以「超出上下文窗口」拒绝、且本轮尚未输出任何文本时，收紧到所发请求的 3/4 再裁一次重发 |
+| 输出截断 | — | `max_tokens` / `model_context_window_exceeded` / `finish_reason: length` / `response.incomplete` 时丢弃本轮工具调用（参数可能写到一半），答案末尾标注「未完成」后正常结束 |
 | `ctx` 超时 | 复用请求 ctx | 客户端断开即停 |
 | 能力错误 | — | 模型不支持 tools 时 SDK 报错 → 透传为 `AgentError`，**明确文案**，不静默 |
 
@@ -271,6 +273,7 @@ emit AgentDone   // 到达 maxRounds 仍未收尾，强制结束（已产出的�
 - **工具执行错误**（检索失败、参数非法）：**不中止**，包装成 tool 结果 `"工具执行失败：..."` 喂回模型，让它换 query 或如实告知用户。
 - **Provider/传输错误**（鉴权失败、网络、模型不支持 tools）：**中止**，emit `AgentError` → SSE `error`，前端明确提示。
 - **到达 maxRounds**：正常收尾（`AgentDone`），把已生成文本作为答案；可在末尾附一句"（检索轮数已达上限）"。
+- **输出被长度上限截断**：不当作正常完成，也不当作错误——已输出的文本保留，末尾追加 `RunStrings.OutputTruncated` 说明未完成；本轮的工具调用一律不执行。被内容过滤截停（`content_filter`）则报错，因为已输出的部分不是答案。
 - 所有错误都有可观测落点（zap，`module=agent`，见 `docs/dev/logging.md`），**不允许 `_ = err` 式吞错**。
 
 ## 9. SSE 事件契约（扩展，向后兼容）
@@ -323,7 +326,8 @@ emit AgentDone   // 到达 maxRounds 仍未收尾，强制结束（已产出的�
 ## 13. 成本与护栏参数
 
 - 封 3 轮下：典型"搜一次再答"≈ 2 次模型调用、token/延迟 **2–4×**；多搜 ≈ 4–6×（上下文累积近平方增长）。
-- 缓解：system + tool 定义走 **prompt cache**（OpenAI/Anthropic 支持）；工具结果保持精简（仅文本快照）；查询去重；丢最旧 tool 结果。
+- 缓解：**prompt cache**——OpenAI 系按前缀自动缓存；Anthropic 在 system 末尾和（仅流式 Loop）最后一个 block 各打一个断点，断点随对话前移，每轮读上一轮的前缀。清理旧工具结果会改写中段、使其后的缓存失效，所以一旦清理就清到上限的 80%（`trimTargetPercent`，同 Anthropic context editing 的 `clear_at_least`），后续几轮只追加。工具结果保持精简（仅文本快照）；查询去重。
+- 每次运行结束以 `module=agent` 记录轮数与 input / cached / output tokens 合计，缓存命中率据此可查。
 - 新增可选环境变量（命名待定）：`ECH0_CHAT_MAX_ROUNDS`、`ECH0_CHAT_TOKEN_BUDGET`、`ECH0_CHAT_TOOL_TIMEOUT`。
 - **`summarize_echos`（§18）的额外成本**：聚合一次最多拉 `maxAggregateEchos=5000` 条；map-reduce 的 LLM 调用数 ≈ 月份数（+1 次可选 reduce），但只在「窗口放不下」时触发——窗口足够（如 1M）则零额外调用、单次塞入。成本随 `AgentSetting.ContextWindow` 自适应。
 
@@ -341,11 +345,11 @@ emit AgentDone   // 到达 maxRounds 仍未收尾，强制结束（已产出的�
 | # | 议题 | 决策 |
 |---|---|---|
 | 1 | `search_echos` 是否暴露 `top_k` 给模型 | **固定 6，不暴露**。模型只传 `query`，减少自由度带来的不稳定，行为可预测。 |
-| 2 | 是否加 `keyword_search`(FTS) 作第二工具 | **本期只做 vector search**。无 embedding 兜底议题另案处理，不进本重构。 |
+| 2 | 是否加 `keyword_search`(FTS) 作第二工具 | **本期只做 vector search**。无 embedding 兜底议题另案处理，不进本重构。（后续已补：索引未建/报错/结果不足 top-k 时，`searchByQuery` 以关键词检索补足并去重。） |
 | 3 | v1 是否开启多轮历史 | **先单轮验证工具体验**。历史接入点已预留（§11），跑通后再开多轮。 |
 | 4 | Gemini 协议去留 | **整协议下线（方案 B）**。`agent` 仅保留 OpenAI 兼容 + Anthropic（见 §15.1）。 |
 | 5 | 年终/区间总结怎么做 | **独立工具 `summarize_echos` + 窗口自适应 map-reduce**，不把 `search_echos` 撑成万能（见 §18）。 |
-| 6 | 模型窗口如何感知 | **`AgentSetting` 新增可选 `ContextWindow`**（0=按 256k 保守默认），驱动聚合取数预算（见 §18.3）。 |
+| 6 | 模型窗口如何感知 | **`AgentSetting` 新增可选 `ContextWindow`**（0=按 64k 保守默认），驱动整次请求的预算划分（见 §18.3）。 |
 
 ### 15.1 Gemini 整协议下线（方案 B，已定）
 
@@ -473,14 +477,22 @@ export function sseStream<E = unknown>(opts: {
 
 ### 18.3 `AgentSetting.ContextWindow` 与 token 预算
 
-新增可选字段 `ContextWindow int`（token；0=未配置）。前端以 `256k`/`1m` 友好单位填写，解析成 token 数存储（`web/src/utils/tokenSize.ts`）。预算模型（`budget.go`）：
+新增可选字段 `ContextWindow int`（token；0=未配置）。前端以 `128k`/`1m` 友好单位填写，解析成 token 数存储（`web/src/utils/tokenSize.ts`）。预算模型（`budget.go` 的 `planContext`）把**同一个窗口**一次性分给请求的各部分，而不是各算各的：
 
 ```
-window  = ContextWindow>0 ? ContextWindow : 256_000   // 默认保守 256k
-usable  = max(window * 0.6 - 8_000, 2_000)            // 扣掉 system/工具定义/成稿留白，留下塞物料的预算
+window   = ContextWindow>0 ? ContextWindow : 64_000         // 未配置按保守 64k；高估会直接超长报错，低估只是多一轮 map-reduce
+reserve  = clamp(window/4, 1_024, 16_000)                   // 先留出模型输出
+input    = (window - reserve) * 0.9                          // 整个请求的上限（交给 Loop 的 trimContext），0.9 吸收估算误差
+free     = input - (system prompt + 工具定义 + 本轮问题)
+history  = clamp(free/4, 300, 16_000)，且 ≤ free/2            // 多轮历史
+material = max((free - history) * 0.6, 1_000)               // 一次 summarize_echos 的物料上限
 ```
 
-度量复用 `estimateTokens`（rune 计数，CJK≈1/字），不引 tokenizer。
+度量用 `agent.EstimateTokens`：CJK 按 1 token/字，其余按 3 字符/token（偏保守，不引 tokenizer）。旧实现按 rune 计数，会把英文高估 3~4 倍。
+
+Loop 侧 `trimContext` 超限时按「价值从低到高」让步：先清空更早轮次的工具结果（清到上限的 80%，见 §13），再丢图片，最后才按比例截断**最新一轮**的结果（并标注已截断），绝不整条丢掉最新结果——否则模型会在没有材料的情况下写总结。工具定义不在 messages 里，但每次请求都带，Loop 从预算里先扣掉它（`agent.ToolDefTokens`）。
+
+估算只在第一轮是唯一依据。每轮回复都带 provider 自己的 `usage`，Loop（`window.go`）记下「真实 input − 该请求的估算」作为偏移，此后只对新增部分做估算：误差被限制在一轮的增量里，而不是整段对话；provider 在消息之外附加的内容（角色框架、工具说明、回放的推理）也一并算进来。仍然超窗时见 §7.3 的超窗重试。
 
 ### 18.4 `summarize_echos` 工具
 

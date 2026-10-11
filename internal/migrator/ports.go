@@ -12,5 +12,5 @@ import (
 type (
 	KVStore        = kvstore.Store
 	StorageManager = *storage.Manager
-	AppCache       = cache.ICache[string, any]
+	AppCache       = *cache.Cache
 )

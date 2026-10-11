@@ -170,7 +170,7 @@ func collectComments(db *gorm.DB, data *dataset) error {
 }
 
 func collectSite(ctx context.Context, deps Deps, data *dataset) error {
-	system, err := coreSetting.Get(ctx, deps.KV, coreSetting.System)
+	system, err := coreSetting.System.Get(ctx, deps.KV)
 	if err != nil {
 		return fmt.Errorf("capsule export: load system setting: %w", err)
 	}

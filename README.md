@@ -4,7 +4,7 @@
 
 # Ech0
 
-[Preview](https://memo.vaaat.com/) · [Official Site & Documentation](https://www.ech0.app/) · [Releases](https://lin-snow.github.io/Ech0/) · [Ech0 Hub](https://hub.ech0.app/)
+[Preview](https://memo.sn0w.fyi/) · [Official Site & Documentation](https://www.ech0.app/) · [Releases](https://lin-snow.github.io/Ech0/) · [Ech0 Hub](https://hub.ech0.app/)
 
 <img src="https://img.shields.io/badge/-English-F54A00?style=for-the-badge" alt="English"> <a title="zh" href="./README.zh.md"><img src="https://img.shields.io/badge/-简体中文-545759?style=for-the-badge" alt="简体中文"></a> <a title="de" href="./README.de.md"><img src="https://img.shields.io/badge/-Deutsch-545759?style=for-the-badge" alt="Deutsch"></a> <a title="ja" href="./README.ja.md"><img src="https://img.shields.io/badge/-日本語-545759?style=for-the-badge" alt="日本語"></a>
 
@@ -193,7 +193,7 @@ For the simplest path, the [Try in 60 Seconds](#try-in-60-seconds) snippet above
    Ech0 currently uses a lightweight role model (Owner / Admin / regular user) to keep operation simple and predictable. The permission model will continue to evolve based on community feedback.
 
 8. **Why can't others see their Connect avatar?**
-   Set your current instance URL in `System Settings - Service URL`, for example `https://memo.vaaat.com` (must include `http://` or `https://`).
+   Set your current instance URL in `System Settings - Service URL`, for example `https://memo.sn0w.fyi/` (must include `http://` or `https://`).
 
 9. **What is the MetingAPI option in settings?**
    It is the API endpoint used by music cards to resolve playable stream metadata. You can provide your own trusted endpoint; when left empty, Ech0 falls back to a default resolver endpoint. For production, a self-controlled endpoint is recommended.
@@ -269,7 +269,7 @@ If you want to use Ech0 in a proprietary product, closed-source hosted service, 
 
 **Development**
 
-Local setup, environment requirements, and front-/back-end integration are documented in **[docs/dev/development.md](./docs/dev/development.md)**. For higher-level architecture and conventions, see [`CLAUDE.md`](./CLAUDE.md) and [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+Local setup, environment requirements, and front-/back-end integration are documented in **[docs/dev/development.md](./docs/dev/development.md)**. For higher-level architecture and conventions, see [`CLAUDE.md`](./CLAUDE.md) and [`CONTRIBUTING.md`](./CONTRIBUTING.md). An interactive architecture diagram is available at **[ech0.app/arch](https://www.ech0.app/arch)**.
 
 ---
 

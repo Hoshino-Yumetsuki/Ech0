@@ -8,6 +8,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/lin-snow/ech0/internal/embedding"
 	commonModel "github.com/lin-snow/ech0/internal/model/common"
 	echoModel "github.com/lin-snow/ech0/internal/model/echo"
 	embModel "github.com/lin-snow/ech0/internal/model/embedding"
@@ -37,7 +38,16 @@ func newSeamSvc(t *testing.T) (
 	reader := embeddingmock.NewMockEchoReader(t)
 	emb := embeddingmock.NewMockEmbedder(t)
 	svc := embeddingService.NewEmbeddingService(repo, kv, reader).WithEmbedder(emb)
+	// Backfill sweeps orphaned index rows once up front; tests about paging
+	// and embedding don't care, the ones about the sweep assert it directly.
+	repo.EXPECT().PruneOrphans(mock.Anything).Return(0, nil).Maybe()
 	return svc, repo, kv, reader, emb
+}
+
+func expectIndexReady(t *testing.T, kv *kvmock.MockStore, ctx context.Context) {
+	t.Helper()
+	kv.EXPECT().Get(ctx, commonModel.EmbeddingIndexStateKey).
+		Return(mustJSONState(t, testModel, testDim), nil).Once()
 }
 
 func expectEnsureReadyFastPath(t *testing.T, repo *embeddingmock.MockRepository, kv *kvmock.MockStore, ctx context.Context) {
@@ -132,6 +142,7 @@ func TestSearch_KNormalization(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, repo, kv, _, emb := newSeamSvc(t)
 			kv.EXPECT().Get(ctx, commonModel.EmbeddingSettingKey).Return(enabledSettingJSON(t), nil).Once()
+			expectIndexReady(t, kv, ctx)
 			emb.EXPECT().EmbedOne(ctx, enabledSetting(), "q").Return(wantVec, nil).Once()
 			repo.EXPECT().Search(ctx, wantVec, tc.wantK, "").
 				Return([]embModel.SearchResult{{EchoID: "e1"}}, nil).Once()
@@ -159,6 +170,7 @@ func TestSearch_AuthorPassthrough(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, repo, kv, _, emb := newSeamSvc(t)
 			kv.EXPECT().Get(ctx, commonModel.EmbeddingSettingKey).Return(enabledSettingJSON(t), nil).Once()
+			expectIndexReady(t, kv, ctx)
 			emb.EXPECT().EmbedOne(ctx, enabledSetting(), "q").Return(wantVec, nil).Once()
 			repo.EXPECT().Search(ctx, wantVec, 5, tc.author).
 				Return([]embModel.SearchResult{}, nil).Once()
@@ -176,6 +188,7 @@ func TestSearch_PostSeamErrors(t *testing.T) {
 		svc, _, kv, _, emb := newSeamSvc(t)
 		boom := errors.New("embed boom")
 		kv.EXPECT().Get(ctx, commonModel.EmbeddingSettingKey).Return(enabledSettingJSON(t), nil).Once()
+		expectIndexReady(t, kv, ctx)
 		emb.EXPECT().EmbedOne(ctx, enabledSetting(), "q").Return(nil, boom).Once()
 
 		got, err := svc.Search(ctx, "q", 5, "")
@@ -188,6 +201,7 @@ func TestSearch_PostSeamErrors(t *testing.T) {
 		boom := errors.New("search boom")
 		vec := []float32{1}
 		kv.EXPECT().Get(ctx, commonModel.EmbeddingSettingKey).Return(enabledSettingJSON(t), nil).Once()
+		expectIndexReady(t, kv, ctx)
 		emb.EXPECT().EmbedOne(ctx, enabledSetting(), "q").Return(vec, nil).Once()
 		repo.EXPECT().Search(ctx, vec, 5, "").Return(nil, boom).Once()
 
@@ -269,6 +283,8 @@ func TestBackfill_EmbedError_ReturnsLastErr(t *testing.T) {
 	reader.EXPECT().GetEchosByPage(1, 100, "", true).
 		Return([]echoModel.Echo{newBackfillEcho("e1", "a", "u", 1), newBackfillEcho("e2", "b", "u", 2)}, int64(2)).Once()
 	emb.EXPECT().Embed(ctx, enabledSetting(), []string{"a", "b"}).Return(nil, boom).Once()
+	emb.EXPECT().EmbedOne(ctx, enabledSetting(), "a").Return(nil, boom).Once()
+	emb.EXPECT().EmbedOne(ctx, enabledSetting(), "b").Return(nil, boom).Once()
 
 	res, err := svc.Backfill(ctx, nil)
 	require.ErrorIs(t, err, boom)
@@ -383,4 +399,38 @@ func TestBackfill_ContextCancelledMidLoop(t *testing.T) {
 	res, err := svc.Backfill(ctx, func(embeddingService.BackfillResult) { cancel() })
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, 1, res.Indexed, "page 1 work is preserved in the returned partial result")
+}
+
+// One input the provider rejects — too long, or tripping a filter — must cost
+// only itself, not the page it was fetched with.
+func TestBackfill_BadInputIsIsolated(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, kv, reader, emb := newSeamSvc(t)
+	tooLong := errors.New("input exceeds max tokens")
+
+	kv.EXPECT().Get(ctx, commonModel.EmbeddingSettingKey).Return(enabledSettingJSON(t), nil).Once()
+	expectEnsureReadyFastPath(t, repo, kv, ctx)
+	reader.EXPECT().GetEchosByPage(1, 100, "", true).
+		Return([]echoModel.Echo{newBackfillEcho("e1", "a", "u", 1), newBackfillEcho("e2", "b", "u", 2)}, int64(2)).Once()
+	emb.EXPECT().Embed(ctx, enabledSetting(), []string{"a", "b"}).Return(nil, tooLong).Once()
+	emb.EXPECT().EmbedOne(ctx, enabledSetting(), "a").Return([]float32{1}, nil).Once()
+	emb.EXPECT().EmbedOne(ctx, enabledSetting(), "b").Return(nil, tooLong).Once()
+	repo.EXPECT().Upsert(ctx, mock.MatchedBy(func(m *embModel.EchoEmbedding) bool { return m.EchoID == "e1" }), mock.Anything).
+		Return(nil).Once()
+
+	res, err := svc.Backfill(ctx, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Indexed)
+	assert.Equal(t, 1, res.Failed)
+}
+
+func TestSearch_IndexNotBuiltRefuses(t *testing.T) {
+	ctx := context.Background()
+	svc, _, kv, _, _ := newSeamSvc(t)
+	kv.EXPECT().Get(ctx, commonModel.EmbeddingSettingKey).Return(enabledSettingJSON(t), nil).Once()
+	kv.EXPECT().Get(ctx, commonModel.EmbeddingIndexStateKey).
+		Return(mustJSONState(t, "another-model", testDim), nil).Once()
+
+	_, err := svc.Search(ctx, "q", 5, "")
+	require.ErrorIs(t, err, embedding.ErrIndexNotReady)
 }

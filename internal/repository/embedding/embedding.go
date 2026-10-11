@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	echoModel "github.com/lin-snow/ech0/internal/model/echo"
 	model "github.com/lin-snow/ech0/internal/model/embedding"
 	"github.com/lin-snow/ech0/internal/transaction"
 	"gorm.io/gorm"
@@ -61,26 +62,38 @@ func vecToJSON(vec []float32) string {
 	return b.String()
 }
 
+// Upsert stores an Echo's embedding, unless the Echo is already gone.
+//
+// Indexing is slow — it waits on the embedding API — and runs on its own
+// subscription, so an Echo deleted right after it was written can have its
+// delete handled first and its vector arrive afterwards. Checking for the Echo
+// inside the same write transaction closes that window: a delete that commits
+// before this transaction reads is seen here, and one that commits after has
+// to wait for this write and is then followed by its own RemoveEcho.
 func (r *EmbeddingRepository) Upsert(ctx context.Context, meta *model.EchoEmbedding, vector []float32) error {
-	db := r.getDB(ctx)
+	return r.getDB(ctx).Transaction(func(tx *gorm.DB) error {
+		var live int64
+		if err := tx.Model(&echoModel.Echo{}).Where("id = ?", meta.EchoID).Count(&live).Error; err != nil {
+			return err
+		}
+		if live == 0 {
+			return nil
+		}
 
-	if err := db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "echo_id"}},
-		UpdateAll: true,
-	}).Create(meta).Error; err != nil {
-		return err
-	}
-
-	if err := db.Exec("DELETE FROM "+vecTable+" WHERE echo_id = ?", meta.EchoID).Error; err != nil {
-		return err
-	}
-	if err := db.Exec(
-		"INSERT INTO "+vecTable+"(echo_id, embedding) VALUES (?, ?)",
-		meta.EchoID, vecToJSON(vector),
-	).Error; err != nil {
-		return err
-	}
-	return nil
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "echo_id"}},
+			UpdateAll: true,
+		}).Create(meta).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("DELETE FROM "+vecTable+" WHERE echo_id = ?", meta.EchoID).Error; err != nil {
+			return err
+		}
+		return tx.Exec(
+			"INSERT INTO "+vecTable+"(echo_id, embedding) VALUES (?, ?)",
+			meta.EchoID, vecToJSON(vector),
+		).Error
+	})
 }
 
 func (r *EmbeddingRepository) Delete(ctx context.Context, echoID string) error {
@@ -108,13 +121,22 @@ const searchOverfetchFactor = 8
 
 const searchOverfetchCap = 200
 
-func (r *EmbeddingRepository) Search(ctx context.Context, vector []float32, k int, authorUsername string) ([]model.SearchResult, error) {
+// Search returns the k nearest Echos to vector, optionally only those authored
+// by authorID.
+//
+// The KNN runs on the vector table, but every hit is then resolved against the
+// live echos table rather than the copy stored beside its vector. That copy is
+// a snapshot from index time: it keeps a username the author has since changed
+// and outlives an Echo deleted while its embedding was still being computed.
+// Joining on the source of truth filters by the stable user ID, drops orphans,
+// and returns the text as it reads now.
+func (r *EmbeddingRepository) Search(ctx context.Context, vector []float32, k int, authorID string) ([]model.SearchResult, error) {
 	if k <= 0 {
 		k = 6
 	}
 
 	fetch := k
-	if authorUsername != "" {
+	if authorID != "" {
 		fetch = min(k*searchOverfetchFactor, searchOverfetchCap)
 	}
 
@@ -138,30 +160,32 @@ func (r *EmbeddingRepository) Search(ctx context.Context, vector []float32, k in
 		ids[i] = row.EchoID
 	}
 
-	metaQuery := r.getDB(ctx).Where("echo_id IN ?", ids)
-	if authorUsername != "" {
-		metaQuery = metaQuery.Where("username = ?", authorUsername)
+	echoQuery := r.getDB(ctx).Model(&echoModel.Echo{}).
+		Select("id", "content", "username", "created_at").
+		Where("id IN ?", ids)
+	if authorID != "" {
+		echoQuery = echoQuery.Where("user_id = ?", authorID)
 	}
-	var metas []model.EchoEmbedding
-	if err := metaQuery.Find(&metas).Error; err != nil {
+	var echos []echoModel.Echo
+	if err := echoQuery.Find(&echos).Error; err != nil {
 		return nil, err
 	}
-	metaByID := make(map[string]model.EchoEmbedding, len(metas))
-	for _, m := range metas {
-		metaByID[m.EchoID] = m
+	byID := make(map[string]echoModel.Echo, len(echos))
+	for _, e := range echos {
+		byID[e.ID] = e
 	}
 
 	results := make([]model.SearchResult, 0, min(k, len(rows)))
 	for _, row := range rows {
-		m, ok := metaByID[row.EchoID]
+		e, ok := byID[row.EchoID]
 		if !ok {
 			continue
 		}
 		results = append(results, model.SearchResult{
-			EchoID:      m.EchoID,
-			Content:     m.Content,
-			Username:    m.Username,
-			EchoCreated: m.EchoCreated,
+			EchoID:      e.ID,
+			Content:     e.Content,
+			Username:    e.Username,
+			EchoCreated: e.CreatedAt,
 			Distance:    row.Distance,
 		})
 		if len(results) >= k {
@@ -169,6 +193,22 @@ func (r *EmbeddingRepository) Search(ctx context.Context, vector []float32, k in
 		}
 	}
 	return results, nil
+}
+
+// PruneOrphans deletes index rows whose Echo no longer exists, and reports how
+// many went. An Echo deleted while its embedding was in flight leaves exactly
+// such a row behind; a rebuild is the natural moment to sweep them.
+func (r *EmbeddingRepository) PruneOrphans(ctx context.Context) (int64, error) {
+	db := r.getDB(ctx)
+	live := db.Model(&echoModel.Echo{}).Select("id")
+	res := db.Where("echo_id NOT IN (?)", live).Delete(&model.EchoEmbedding{})
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	if err := db.Exec("DELETE FROM " + vecTable + " WHERE echo_id NOT IN (SELECT echo_id FROM echo_embeddings)").Error; err != nil {
+		return res.RowsAffected, err
+	}
+	return res.RowsAffected, nil
 }
 
 func (r *EmbeddingRepository) ClearAll(ctx context.Context) error {

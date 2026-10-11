@@ -26,6 +26,8 @@ func runStringsFor(locale string) agent.RunStrings {
 			ToolError:       "工具执行失败：",
 			ImageNote:       "（以下是上一步检索命中的 Echo 的配图，供你结合图片内容作答）",
 			ContextTrimNote: "（早前检索结果已省略以控制长度）",
+			TruncateNote:    "（结果过长，其余部分已截断）",
+			OutputTruncated: "（输出达到模型的长度上限，回答未完成）",
 		}
 	}
 	return agent.RunStrings{
@@ -34,6 +36,8 @@ func runStringsFor(locale string) agent.RunStrings {
 		ToolError:       "Tool execution failed: ",
 		ImageNote:       "(Below are images from the Echo matched in the previous step; use them to inform your answer.)",
 		ContextTrimNote: "(Earlier search results omitted to control length.)",
+		TruncateNote:    "(Result too long; the rest was cut.)",
+		OutputTruncated: "(The model hit its output length limit; this answer is incomplete.)",
 	}
 }
 
@@ -195,6 +199,16 @@ func aggregateMapPromptFor(locale string) string {
 		"preserves key events, recurring themes, mood shifts, mentioned people/places/works, active tags and posting of images. " +
 		"Summarize only — do not embellish or invent, do not enumerate each entry, and do not output HTML. " +
 		"Use the same language as the content. This is intermediate material for a later period summary."
+}
+
+func unknownTagsMessageFor(locale string, names []string) string {
+	if localeIsZH(locale) {
+		return "没有这些标签：" + strings.Join(names, "、") +
+			"。请改用系统提示里列出的已有标签，或不带 tags、改用 query 检索；不要把全部 Echo 的结果当作该标签的结果。"
+	}
+	return "No such tags: " + strings.Join(names, ", ") +
+		". Use one of the existing tags listed in the system prompt, or search with query instead of tags; " +
+		"do not present results over all Echos as results for these tags."
 }
 
 func searchCoverageNoteFor(locale string, total, shown int) string {

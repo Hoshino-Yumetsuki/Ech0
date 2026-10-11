@@ -110,7 +110,7 @@ func TestAppendTurn_EmptyUserSkips(t *testing.T) {
 
 func TestGetSession(t *testing.T) {
 	t.Run("none returns empty slice", func(t *testing.T) {
-		s := &CopilotService{durableKV: kvstore.NewMemory()}
+		s := &CopilotService{durableKV: kvstore.NewMemory(), userReader: adminReader()}
 		got, err := s.GetSession(helpers.CtxAsUser("u1"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -121,7 +121,7 @@ func TestGetSession(t *testing.T) {
 	})
 	t.Run("returns persisted", func(t *testing.T) {
 		kv := kvstore.NewMemory()
-		s := &CopilotService{durableKV: kv}
+		s := &CopilotService{durableKV: kv, userReader: adminReader()}
 		s.appendTurn(context.Background(), "u1", ChatMessage{Role: "user", Content: "hi"})
 
 		got, err := s.GetSession(helpers.CtxAsUser("u1"))
@@ -137,7 +137,7 @@ func TestGetSession(t *testing.T) {
 func TestClearSession(t *testing.T) {
 	t.Run("deletes for user", func(t *testing.T) {
 		kv := kvstore.NewMemory()
-		s := &CopilotService{durableKV: kv}
+		s := &CopilotService{durableKV: kv, userReader: adminReader()}
 		s.appendTurn(context.Background(), "u1", ChatMessage{Role: "user", Content: "hi"})
 
 		if err := s.ClearSession(helpers.CtxAsUser("u1")); err != nil {
@@ -147,10 +147,10 @@ func TestClearSession(t *testing.T) {
 			t.Fatalf("session should be cleared, got %#v", got)
 		}
 	})
-	t.Run("anonymous is noop", func(t *testing.T) {
-		s := &CopilotService{durableKV: kvstore.NewMemory()}
-		if err := s.ClearSession(helpers.CtxAnonymous()); err != nil {
-			t.Fatalf("anonymous clear should be a nil no-op, got %v", err)
+	t.Run("anonymous is refused", func(t *testing.T) {
+		s := &CopilotService{durableKV: kvstore.NewMemory(), userReader: adminReader()}
+		if err := s.ClearSession(helpers.CtxAnonymous()); err == nil {
+			t.Fatalf("anonymous clear should be refused")
 		}
 	})
 }

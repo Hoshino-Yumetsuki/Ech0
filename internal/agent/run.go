@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	logUtil "github.com/lin-snow/ech0/pkg/log"
 	"golang.org/x/sync/errgroup"
@@ -25,7 +24,9 @@ var defaultRunStrings = RunStrings{
 	ToolError:       "工具执行失败：",
 	ImageNote:       toolImageNote,
 	ContextTrimNote: "（早前检索结果已省略以控制长度）",
+	TruncateNote:    "（结果过长，其余部分已截断）",
 	Malformed:       "该工具未被正确声明，已拒绝执行：",
+	OutputTruncated: "（输出达到模型的长度上限，回答未完成）",
 }
 
 func (s RunStrings) withDefaults() RunStrings {
@@ -44,8 +45,14 @@ func (s RunStrings) withDefaults() RunStrings {
 	if s.ContextTrimNote == "" {
 		s.ContextTrimNote = defaultRunStrings.ContextTrimNote
 	}
+	if s.TruncateNote == "" {
+		s.TruncateNote = defaultRunStrings.TruncateNote
+	}
 	if s.Malformed == "" {
 		s.Malformed = defaultRunStrings.Malformed
+	}
+	if s.OutputTruncated == "" {
+		s.OutputTruncated = defaultRunStrings.OutputTruncated
 	}
 	return s
 }
@@ -125,17 +132,48 @@ func runLoop(b *budget, provider Provider, req RunRequest, out chan<- AgentEvent
 	}
 
 	messages := req.Messages
-	seen := make(map[string]bool)
+	seen := make(map[string]int)
 	strs := req.Strings.withDefaults()
+	win := &window{limit: req.MaxContextTokens, fixed: ToolDefTokens(req.Tools)}
+
+	var (
+		usage  Usage
+		rounds int
+	)
+	defer func() { logRun(rounds, usage) }()
+
+	// ask sends one round. A provider refusing it as longer than the model's
+	// window gets one retry, cut to fit — the estimate that sized it is only an
+	// estimate — provided nothing of the round reached the person yet and
+	// cutting actually freed something.
+	ask := func(choice ToolChoice) roundOutcome {
+		for retried := false; ; retried = true {
+			trimContext(messages, win.messageBudget(), strs)
+			sent := contextTokens(messages) + win.fixed
+			o := streamRound(b, provider, out, messages, toolDefs, choice)
+			rounds++
+			usage.add(o.usage)
+			if o.err == nil {
+				win.observe(sent, o.usage)
+				return o
+			}
+			if retried || o.emitted || !isContextOverflow(o.err) {
+				return o
+			}
+			win.overflowed(sent)
+			if trimContext(messages, win.messageBudget(), strs); contextTokens(messages)+win.fixed >= sent {
+				return o
+			}
+			logUtil.GetLogger().Warn("agent request exceeded the model context window, retrying trimmed",
+				slog.String("module", "agent"),
+				slog.Int("estimated_tokens", sent),
+				logUtil.Err(o.err))
+		}
+	}
 
 	for round := 0; round < maxRounds; round++ {
-		trimContext(messages, req.MaxContextTokens, strs.ContextTrimNote)
-		o := streamRound(b, provider, out, messages, toolDefs, req.Temp)
-		if o.aborted {
-			return
-		}
-		if o.err != nil {
-			emit(b.base, out, AgentEvent{Kind: AgentError, Err: o.err})
+		o := ask(ToolChoiceAuto)
+		if !settle(b, out, o, strs) {
 			return
 		}
 		if len(o.calls) == 0 {
@@ -143,29 +181,69 @@ func runLoop(b *budget, provider Provider, req RunRequest, out chan<- AgentEvent
 			return
 		}
 
-		messages = append(messages, Message{Role: RoleAssistant, Content: o.assistant, ToolCalls: o.calls})
+		messages = append(messages, Message{
+			Role:      RoleAssistant,
+			Content:   o.assistant,
+			ToolCalls: o.calls,
+			Native:    o.native,
+		})
 		if !execTools(b, out, o.calls, toolByName, seen, &messages, strs) {
 			return
 		}
 	}
 
-	trimContext(messages, req.MaxContextTokens, strs.ContextTrimNote)
-	o := streamRound(b, provider, out, messages, nil, req.Temp)
-	if o.aborted {
-		return
+	// Out of tool rounds: ask for the answer with the tools still declared but
+	// closed. The history now holds tool calls, and a request that drops the
+	// declarations beside them is one Anthropic refuses outright.
+	var finalChoice ToolChoice
+	if len(toolDefs) > 0 {
+		finalChoice = ToolChoiceNone
 	}
-	if o.err != nil {
+	if settle(b, out, ask(finalChoice), strs) {
+		emit(b.base, out, AgentEvent{Kind: AgentDone})
+	}
+}
+
+// settle ends the run on a round that cannot go on, and reports whether it
+// may. A truncated round ends it too: its text stops mid-sentence, and a tool
+// call in it may be cut mid-argument — running that would act on arguments the
+// model never finished writing. So the calls are dropped, the answer is marked
+// as unfinished, and the run closes normally, keeping what was said.
+func settle(b *budget, out chan<- AgentEvent, o roundOutcome, strs RunStrings) bool {
+	switch {
+	case o.aborted:
+		return false
+	case o.err != nil:
 		emit(b.base, out, AgentEvent{Kind: AgentError, Err: o.err})
-		return
+		return false
+	case o.truncated:
+		if emit(b.base, out, AgentEvent{Kind: AgentDelta, Text: "\n\n" + strs.OutputTruncated}) {
+			emit(b.base, out, AgentEvent{Kind: AgentDone})
+		}
+		return false
 	}
-	emit(b.base, out, AgentEvent{Kind: AgentDone})
+	return true
+}
+
+func logRun(rounds int, u Usage) {
+	logUtil.GetLogger().Info("agent run finished",
+		slog.String("module", "agent"),
+		slog.Int("rounds", rounds),
+		slog.Int("input_tokens", u.InputTokens),
+		slog.Int("cached_tokens", u.CachedTokens),
+		slog.Int("output_tokens", u.OutputTokens))
 }
 
 type roundOutcome struct {
 	calls     []ToolCall
 	assistant string
-	aborted   bool
-	err       error
+	native    any
+	usage     Usage
+	truncated bool
+	// emitted is whether any of the round's text already went out.
+	emitted bool
+	aborted bool
+	err     error
 }
 
 func streamRound(
@@ -174,15 +252,15 @@ func streamRound(
 	out chan<- AgentEvent,
 	messages []Message,
 	toolDefs []ToolDef,
-	temp *float32,
+	choice ToolChoice,
 ) roundOutcome {
 	ctx, cancel := b.step()
 	defer cancel()
 
 	evCh, err := provider.Stream(ctx, Request{
-		Messages:    messages,
-		Tools:       toolDefs,
-		Temperature: temp,
+		Messages:   messages,
+		Tools:      toolDefs,
+		ToolChoice: choice,
 	})
 	if err != nil {
 		return roundOutcome{err: err}
@@ -196,10 +274,12 @@ func streamRound(
 		switch ev.Kind {
 		case EventTextDelta:
 			text.WriteString(ev.Text)
+			o.emitted = true
 			if !emit(b.base, out, AgentEvent{Kind: AgentDelta, Text: ev.Text}) {
 				o.aborted = true
 			}
 		case EventReasoningDelta:
+			o.emitted = true
 			if !emit(b.base, out, AgentEvent{Kind: AgentReasoning, Text: ev.Text}) {
 				o.aborted = true
 			}
@@ -208,6 +288,9 @@ func streamRound(
 		case EventError:
 			o.err = ev.Err
 		case EventDone:
+			o.native = ev.Native
+			o.truncated = ev.Truncated
+			o.usage = ev.Usage
 		}
 		if o.aborted {
 			o.assistant = text.String()
@@ -230,7 +313,7 @@ func execTools(
 	out chan<- AgentEvent,
 	calls []ToolCall,
 	toolByName map[string]Tool,
-	seen map[string]bool,
+	seen map[string]int,
 	messages *[]Message,
 	strs RunStrings,
 ) bool {
@@ -239,24 +322,26 @@ func execTools(
 	imageMsgs := make([]*Message, n)
 	outputs := make([]ToolOutput, n)
 	execErrs := make([]error, n)
+	keys := make([]string, n)
 
 	var runnable, interactive []int
+	inRound := make(map[string]bool, n)
 	for i, tc := range calls {
-		key := tc.Name + ":" + string(tc.Args)
-		if seen[key] {
-			toolMsgs[i] = Message{Role: RoleTool, ToolCallID: tc.ID, Content: strs.DedupNote}
-			continue
-		}
+		keys[i] = tc.Name + ":" + string(tc.Args)
 		tool, ok := toolByName[tc.Name]
 		if !ok {
-			toolMsgs[i] = Message{Role: RoleTool, ToolCallID: tc.ID, Content: strs.UnknownTool + tc.Name}
+			toolMsgs[i] = Message{Role: RoleTool, ToolCallID: tc.ID, Content: strs.UnknownTool + tc.Name, IsError: true}
 			continue
 		}
 		if tool.blocksOnPerson() {
 			interactive = append(interactive, i)
 			continue
 		}
-		seen[key] = true
+		if inRound[keys[i]] || stillInContext(*messages, seen, keys[i], strs) {
+			toolMsgs[i] = Message{Role: RoleTool, ToolCallID: tc.ID, Content: strs.DedupNote}
+			continue
+		}
+		inRound[keys[i]] = true
 		runnable = append(runnable, i)
 	}
 
@@ -288,6 +373,13 @@ func execTools(
 		b.credit(time.Since(started))
 	}
 
+	base := len(*messages)
+	for _, idx := range runnable {
+		if execErrs[idx] == nil {
+			seen[keys[idx]] = base + idx
+		}
+	}
+
 	for _, idx := range append(runnable, interactive...) {
 		tc := calls[idx]
 		if execErrs[idx] != nil {
@@ -295,7 +387,10 @@ func execTools(
 				slog.String("module", "agent"),
 				slog.String("tool", tc.Name),
 				logUtil.Err(execErrs[idx]))
-			toolMsgs[idx] = Message{Role: RoleTool, ToolCallID: tc.ID, Content: strs.ToolError + execErrs[idx].Error()}
+			toolMsgs[idx] = Message{
+				Role: RoleTool, ToolCallID: tc.ID,
+				Content: strs.ToolError + execErrs[idx].Error(), IsError: true,
+			}
 			continue
 		}
 		if !emit(b.base, out, AgentEvent{Kind: AgentToolResult, ToolName: tc.Name, Meta: outputs[idx].Meta}) {
@@ -314,6 +409,18 @@ func execTools(
 		}
 	}
 	return true
+}
+
+// stillInContext reports whether an identical read already succeeded and its
+// result is still there for the model to read. Only then is pointing at it
+// honest: a call that failed never produced anything to point at, and a result
+// the context budget has since cleared is no longer "above".
+func stillInContext(messages []Message, seen map[string]int, key string, strs RunStrings) bool {
+	idx, ok := seen[key]
+	if !ok || idx >= len(messages) {
+		return false
+	}
+	return messages[idx].Content != strs.ContextTrimNote
 }
 
 // blocksOnPerson reports whether this call waits on a human. Derived rather
@@ -390,29 +497,106 @@ func malformedTool(tool Tool, strs RunStrings) (ToolOutput, error) {
 	return ToolOutput{Content: strs.Malformed + tool.Def.Name}, nil
 }
 
-func trimContext(messages []Message, limit int, note string) {
+// imageTokenEstimate is what one attached image is assumed to cost. Both
+// Anthropic (~w×h/750, capped near 1.6k after its own downscale) and OpenAI
+// (tiles at high detail) land in this range for the sizes enrich sends.
+const imageTokenEstimate = 1600
+
+// trimTargetPercent is how far below the limit clearing goes once it has to.
+const trimTargetPercent = 80
+
+// trimContext keeps the request under limit tokens, giving things up in the
+// order they matter least:
+//
+//  1. results of earlier tool rounds, oldest first — the model has already
+//     read them and answered from them;
+//  2. images, oldest first;
+//  3. the newest round's results, cut down in proportion rather than dropped,
+//     so the model is never left answering from nothing.
+//
+// The system prompt, the conversation and the tool calls themselves are never
+// touched: the caller budgets history, and a tool call without its result is a
+// request no provider accepts.
+//
+// Clearing rewrites the middle of the request, and a prompt cache holds only an
+// unchanged prefix, so every clear costs the cache from that point on. Step 1
+// therefore goes down to trimTargetPercent of the limit rather than just under
+// it, and the next rounds can grow by appending instead of clearing again —
+// why Anthropic's own context editing has clear_at_least. Steps 2 and 3 cut
+// only to the limit: what they take is usually the material the answer is
+// being written from.
+func trimContext(messages []Message, limit int, strs RunStrings) {
 	if limit <= 0 {
 		return
 	}
-	for contextTokens(messages) > limit {
-		idx := -1
-		for i := range messages {
-			if messages[i].Role == RoleTool && messages[i].Content != note {
-				idx = i
-				break
-			}
+	used := contextTokens(messages)
+	if used <= limit {
+		return
+	}
+	slack := limit - limit*trimTargetPercent/100
+	over := used - limit + slack
+
+	current := 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == RoleAssistant {
+			current = i + 1
+			break
 		}
-		if idx < 0 {
-			return
+	}
+
+	for i := 0; i < current && over > 0; i++ {
+		m := &messages[i]
+		if m.Role != RoleTool || m.Content == strs.ContextTrimNote {
+			continue
 		}
-		messages[idx].Content = note
+		over -= EstimateTokens(m.Content) - EstimateTokens(strs.ContextTrimNote)
+		m.Content = strs.ContextTrimNote
+	}
+	over -= slack
+
+	for i := range messages {
+		if over <= 0 {
+			break
+		}
+		m := &messages[i]
+		if len(m.Images) == 0 {
+			continue
+		}
+		over -= len(m.Images) * imageTokenEstimate
+		m.Images = nil
+		m.Content = strs.ContextTrimNote
+	}
+	if over <= 0 {
+		return
+	}
+
+	var fresh []int
+	total := 0
+	for i := current; i < len(messages); i++ {
+		if messages[i].Role == RoleTool {
+			fresh = append(fresh, i)
+			total += EstimateTokens(messages[i].Content)
+		}
+	}
+	if total == 0 {
+		return
+	}
+	keep := max(total-over, 0)
+	for _, i := range fresh {
+		m := &messages[i]
+		share := EstimateTokens(m.Content) * keep / total
+		m.Content = TruncateTokens(m.Content, share, strs.TruncateNote)
 	}
 }
 
 func contextTokens(messages []Message) int {
 	total := 0
 	for i := range messages {
-		total += utf8.RuneCountInString(messages[i].Content)
+		total += EstimateTokens(messages[i].Content)
+		total += len(messages[i].Images) * imageTokenEstimate
+		for _, tc := range messages[i].ToolCalls {
+			total += EstimateTokens(string(tc.Args))
+		}
 	}
 	return total
 }

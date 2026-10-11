@@ -14,12 +14,12 @@ import (
 
 type KeyValueRepository struct {
 	db    func() *gorm.DB
-	cache cache.ICache[string, any]
+	cache *cache.Cache
 }
 
 func NewKeyValueRepository(
 	dbProvider func() *gorm.DB,
-	cache cache.ICache[string, any],
+	cache *cache.Cache,
 ) *KeyValueRepository {
 	return &KeyValueRepository{
 		db:    dbProvider,
@@ -36,9 +36,8 @@ func (keyvalueRepository *KeyValueRepository) getDB(ctx context.Context) *gorm.D
 
 func (keyvalueRepository *KeyValueRepository) GetKeyValue(ctx context.Context, key string) (string, error) {
 	cacheKey := GetKeyValueCacheKey(key)
-	return cache.ReadThroughTypedUnlessTx[string](
+	return keyvalueRepository.cache.ReadThroughUnlessTx(
 		ctx,
-		keyvalueRepository.cache,
 		cacheKey,
 		1,
 		func(ctx context.Context) (string, error) {
@@ -63,7 +62,7 @@ func (keyvalueRepository *KeyValueRepository) AddKeyValue(
 	value string,
 ) error {
 	cacheKey := GetKeyValueCacheKey(key)
-	cache.InvalidateKeys(keyvalueRepository.cache, cacheKey)
+	keyvalueRepository.cache.Invalidate(cacheKey)
 
 	if err := keyvalueRepository.getDB(ctx).Create(&model.KeyValue{
 		Key:   key,
@@ -81,7 +80,7 @@ func (keyvalueRepository *KeyValueRepository) DeleteKeyValue(
 	ctx context.Context,
 	key string,
 ) error {
-	cache.InvalidateKeys(keyvalueRepository.cache, GetKeyValueCacheKey(key))
+	keyvalueRepository.cache.Invalidate(GetKeyValueCacheKey(key))
 
 	if err := keyvalueRepository.getDB(ctx).Where("key = ?", key).Delete(&model.KeyValue{}).Error; err != nil {
 		return err
@@ -96,7 +95,7 @@ func (keyvalueRepository *KeyValueRepository) UpdateKeyValue(
 	value string,
 ) error {
 	cacheKey := GetKeyValueCacheKey(key)
-	cache.InvalidateKeys(keyvalueRepository.cache, cacheKey)
+	keyvalueRepository.cache.Invalidate(cacheKey)
 
 	if err := keyvalueRepository.getDB(ctx).Model(&model.KeyValue{}).Where("key = ?", key).Update("value", value).Error; err != nil {
 		return err
@@ -129,7 +128,7 @@ func (keyvalueRepository *KeyValueRepository) AddOrUpdateKeyValue(
 	}
 
 	cacheKey := GetKeyValueCacheKey(key)
-	cache.InvalidateKeys(keyvalueRepository.cache, cacheKey)
+	keyvalueRepository.cache.Invalidate(cacheKey)
 	keyvalueRepository.cache.Set(cacheKey, value, 1)
 
 	return nil

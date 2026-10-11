@@ -11,25 +11,28 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/lin-snow/ech0/internal/agent"
 	commonModel "github.com/lin-snow/ech0/internal/model/common"
 	embeddingModel "github.com/lin-snow/ech0/internal/model/embedding"
 	logUtil "github.com/lin-snow/ech0/pkg/log"
-	"github.com/lin-snow/ech0/pkg/viewer"
 )
 
 const maxStoredChatMessages = 50
 
-const maxHistoryTokens = 4000
+// historyTruncateNote marks an old answer cut to fit the history budget.
+const historyTruncateNote = "…"
 
-const toolDefTokenEstimate = 640
-
-const minHistoryTokens = 500
-
-func estimateTokens(s string) int { return utf8.RuneCountInString(s) }
-
+// historyForModel turns the stored conversation into the history a new request
+// carries, newest turns first until budgetTokens is spent.
+//
+// It works in whole turns — a question with the answers that followed it —
+// because either half alone misleads: an answer without its question reads as
+// the model's own unprompted words, and a request whose history opens on an
+// assistant message is malformed for several providers. When even the newest
+// turn is over budget it is kept and its answer cut down, since the most recent
+// exchange is the one a follow-up ("tell me more about the second one") refers
+// to.
 func historyForModel(msgs []ChatMessage, locale string, budgetTokens int, loc *time.Location) []agent.Message {
 	if len(msgs) == 0 {
 		return nil
@@ -55,25 +58,63 @@ func historyForModel(msgs []ChatMessage, locale string, budgetTokens int, loc *t
 		return c + "\n\n" + note
 	}
 
-	collected := make([]agent.Message, 0, len(msgs))
-	used := 0
-	for i, msg := range slices.Backward(msgs) {
+	var turns [][]agent.Message
+	for i := range msgs {
 		content := contentOf(i)
 		if content == "" {
 			continue
 		}
-		if t := estimateTokens(content); used+t > budgetTokens && len(collected) > 0 {
-			break
-		} else {
-			used += t
+		role := roleFromString(msgs[i].Role)
+		if role == agent.RoleUser {
+			turns = append(turns, nil)
+		} else if len(turns) == 0 {
+			continue
 		}
-		collected = append(collected, agent.Message{Role: roleFromString(msg.Role), Content: content})
+		last := len(turns) - 1
+		turns[last] = append(turns[last], agent.Message{Role: role, Content: content})
 	}
 
-	for l, r := 0, len(collected)-1; l < r; l, r = l+1, r-1 {
-		collected[l], collected[r] = collected[r], collected[l]
+	used := 0
+	first := len(turns)
+	for first > 0 {
+		t := turnTokens(turns[first-1])
+		if used+t > budgetTokens {
+			if first == len(turns) {
+				turns[first-1] = fitTurn(turns[first-1], budgetTokens)
+				first--
+			}
+			break
+		}
+		used += t
+		first--
 	}
-	return collected
+
+	var out []agent.Message
+	for _, turn := range turns[first:] {
+		out = append(out, turn...)
+	}
+	return out
+}
+
+func turnTokens(turn []agent.Message) int {
+	n := 0
+	for _, m := range turn {
+		n += agent.EstimateTokens(m.Content)
+	}
+	return n
+}
+
+// fitTurn cuts a turn's answers so the whole turn fits budget, keeping the
+// question intact: it is short, and it is what the answer means.
+func fitTurn(turn []agent.Message, budget int) []agent.Message {
+	out := slices.Clone(turn)
+	left := budget - agent.EstimateTokens(out[0].Content)
+	for i := 1; i < len(out); i++ {
+		share := max(left/(len(out)-i), 0)
+		out[i].Content = agent.TruncateTokens(out[i].Content, share, historyTruncateNote)
+		left -= agent.EstimateTokens(out[i].Content)
+	}
+	return out
 }
 
 func roleFromString(r string) agent.Role {
@@ -163,8 +204,11 @@ func (s *CopilotService) persistTurn(ctx context.Context, userID, question strin
 }
 
 func (s *CopilotService) GetSession(ctx context.Context) ([]ChatMessage, error) {
-	userID := viewer.MustFromContext(ctx).UserID()
-	msgs := s.loadSession(ctx, userID)
+	user, err := s.requireAdmin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	msgs := s.loadSession(ctx, user.ID)
 	if msgs == nil {
 		return []ChatMessage{}, nil
 	}
@@ -172,9 +216,9 @@ func (s *CopilotService) GetSession(ctx context.Context) ([]ChatMessage, error) 
 }
 
 func (s *CopilotService) ClearSession(ctx context.Context) error {
-	userID := viewer.MustFromContext(ctx).UserID()
-	if userID == "" {
-		return nil
+	user, err := s.requireAdmin(ctx)
+	if err != nil {
+		return err
 	}
-	return s.durableKV.Delete(ctx, chatSessionKey(userID))
+	return s.durableKV.Delete(ctx, chatSessionKey(user.ID))
 }

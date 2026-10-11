@@ -85,7 +85,8 @@ func TestHistoryForModel_TokenBudgetKeepsRecentInOrder(t *testing.T) {
 		{Role: "assistant", Content: strings.Repeat("d", 10)},
 	}
 
-	got := historyForModel(msgs, "zh-CN", 25, time.UTC)
+	// Each 10-letter message is ~4 tokens, so one turn is ~8: room for one.
+	got := historyForModel(msgs, "zh-CN", 10, time.UTC)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 messages within budget, got %d", len(got))
 	}
@@ -100,11 +101,30 @@ func TestHistoryForModel_TinyBudgetKeepsAtLeastOne(t *testing.T) {
 		{Role: "assistant", Content: strings.Repeat("z", 100)},
 	}
 
-	got := historyForModel(msgs, "zh-CN", 1, time.UTC)
-	if len(got) != 1 {
-		t.Fatalf("expected exactly 1 message under tiny budget, got %d", len(got))
+	got := historyForModel(msgs, "zh-CN", 10, time.UTC)
+	if len(got) != 2 {
+		t.Fatalf("expected the newest turn kept whole-shaped under a tiny budget, got %d messages", len(got))
 	}
-	if got[0].Content != strings.Repeat("z", 100) {
-		t.Fatalf("expected the most-recent message to be kept, got %q", got[0].Content)
+	if got[0].Role != agent.RoleUser || got[0].Content != "q1" {
+		t.Fatalf("the question must survive; an answer alone reads as unprompted, got %+v", got[0])
+	}
+	if got[1].Role != agent.RoleAssistant || len(got[1].Content) >= 100 || !strings.HasSuffix(got[1].Content, historyTruncateNote) {
+		t.Fatalf("the answer should be cut to fit and marked, got %q", got[1].Content)
+	}
+}
+
+func TestHistoryForModel_NeverOpensOnAssistant(t *testing.T) {
+	msgs := []ChatMessage{
+		{Role: "assistant", Content: "orphan answer"},
+		{Role: "user", Content: strings.Repeat("长", 50)},
+		{Role: "assistant", Content: strings.Repeat("答", 50)},
+		{Role: "user", Content: "q2"},
+		{Role: "assistant", Content: "a2"},
+	}
+	for _, budget := range []int{5, 60, 150, 10_000} {
+		got := historyForModel(msgs, "zh-CN", budget, time.UTC)
+		if len(got) == 0 || got[0].Role != agent.RoleUser {
+			t.Fatalf("budget %d: history must open on a question, got %+v", budget, got)
+		}
 	}
 }

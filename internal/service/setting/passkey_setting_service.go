@@ -27,7 +27,7 @@ func (settingService *SettingService) GetPasskeySetting(
 		return errors.New(commonModel.NO_PERMISSION_DENIED)
 	}
 
-	v, err := coreSetting.Get(ctx, settingService.durableKV, coreSetting.Passkey)
+	v, err := coreSetting.Passkey.Get(ctx, settingService.durableKV)
 	if err != nil {
 		return err
 	}
@@ -52,11 +52,11 @@ func (settingService *SettingService) UpdatePasskeySetting(
 		WebAuthnRPID:           strings.TrimSpace(newSetting.WebAuthnRPID),
 		WebAuthnAllowedOrigins: sanitizeURLList(newSetting.WebAuthnAllowedOrigins),
 	}
-	return coreSetting.Set(ctx, settingService.durableKV, coreSetting.Passkey, passkeySetting)
+	return coreSetting.Passkey.Set(ctx, settingService.durableKV, passkeySetting)
 }
 
 func (settingService *SettingService) GetPasskeyStatus(status *model.PasskeyStatus) error {
-	v, err := coreSetting.Get(context.Background(), settingService.durableKV, coreSetting.Passkey)
+	v, err := coreSetting.Passkey.Get(context.Background(), settingService.durableKV)
 	if err != nil {
 		return err
 	}

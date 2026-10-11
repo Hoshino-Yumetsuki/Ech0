@@ -17,7 +17,7 @@ import (
 func (settingService *SettingService) GetEmbeddingSetting(
 	ctx context.Context,
 ) (model.EmbeddingSetting, error) {
-	return coreSetting.Get(ctx, settingService.durableKV, coreSetting.Embedding)
+	return coreSetting.Embedding.Get(ctx, settingService.durableKV)
 }
 
 func (settingService *SettingService) UpdateEmbeddingSetting(
@@ -42,5 +42,5 @@ func (settingService *SettingService) UpdateEmbeddingSetting(
 		BatchSize: dto.BatchSize,
 	}
 
-	return coreSetting.Set(ctx, settingService.durableKV, coreSetting.Embedding, setting)
+	return coreSetting.Embedding.Set(ctx, settingService.durableKV, setting)
 }

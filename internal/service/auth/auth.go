@@ -30,8 +30,8 @@ import (
 	coreSetting "github.com/lin-snow/ech0/internal/setting"
 	"github.com/lin-snow/ech0/internal/transaction"
 	cryptoUtil "github.com/lin-snow/ech0/internal/util/crypto"
-	"github.com/lin-snow/ech0/internal/util/egress"
 	jwtUtil "github.com/lin-snow/ech0/internal/util/jwt"
+	"github.com/lin-snow/ech0/pkg/egress"
 	logUtil "github.com/lin-snow/ech0/pkg/log"
 	"github.com/lin-snow/ech0/pkg/viewer"
 	"golang.org/x/oauth2"
@@ -72,7 +72,7 @@ func (authService *AuthService) IsTokenRevoked(jti string) bool {
 }
 
 func (authService *AuthService) PasskeyBoundary(ctx context.Context) (rpID string, origins []string) {
-	setting, err := coreSetting.Get(ctx, authService.durableKV, coreSetting.Passkey)
+	setting, err := coreSetting.Passkey.Get(ctx, authService.durableKV)
 	if err != nil {
 		return "", nil
 	}
@@ -259,7 +259,7 @@ func (authService *AuthService) HandleOAuthCallback(
 }
 
 func (authService *AuthService) getOAuthSetting(provider string) (*settingModel.OAuth2Setting, error) {
-	setting, err := coreSetting.Get(context.Background(), authService.durableKV, coreSetting.OAuth2)
+	setting, err := coreSetting.OAuth2.Get(context.Background(), authService.durableKV)
 	if err != nil {
 		return nil, err
 	}
@@ -517,7 +517,7 @@ func (authService *AuthService) parseAndValidateClientRedirect(redirect string) 
 	allowed := config.Config().Auth.Redirect.AllowedReturnURLs
 	var implicitSelf []string
 	if authService.durableKV != nil {
-		if oauthSetting, err := coreSetting.Get(context.Background(), authService.durableKV, coreSetting.OAuth2); err == nil {
+		if oauthSetting, err := coreSetting.OAuth2.Get(context.Background(), authService.durableKV); err == nil {
 			if len(oauthSetting.AuthRedirectAllowedReturnURLs) > 0 {
 				allowed = oauthSetting.AuthRedirectAllowedReturnURLs
 			}
@@ -971,7 +971,7 @@ func (authService *AuthService) GetOAuthInfo(
 		return oauthInfo, bindingPermissionError(provider)
 	}
 
-	oauth2Setting, err := coreSetting.Get(ctx, authService.durableKV, coreSetting.OAuth2)
+	oauth2Setting, err := coreSetting.OAuth2.Get(ctx, authService.durableKV)
 	if err != nil {
 		return oauthInfo, err
 	}

@@ -709,9 +709,69 @@ func (_c *MockRepository_GetMeta_Call) RunAndReturn(run func(ctx context.Context
 	return _c
 }
 
+// PruneOrphans provides a mock function for the type MockRepository
+func (_mock *MockRepository) PruneOrphans(ctx context.Context) (int64, error) {
+	ret := _mock.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PruneOrphans")
+	}
+
+	var r0 int64
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context) (int64, error)); ok {
+		return returnFunc(ctx)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context) int64); ok {
+		r0 = returnFunc(ctx)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockRepository_PruneOrphans_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PruneOrphans'
+type MockRepository_PruneOrphans_Call struct {
+	*mock.Call
+}
+
+// PruneOrphans is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockRepository_Expecter) PruneOrphans(ctx any) *MockRepository_PruneOrphans_Call {
+	return &MockRepository_PruneOrphans_Call{Call: _e.mock.On("PruneOrphans", ctx)}
+}
+
+func (_c *MockRepository_PruneOrphans_Call) Run(run func(ctx context.Context)) *MockRepository_PruneOrphans_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockRepository_PruneOrphans_Call) Return(n int64, err error) *MockRepository_PruneOrphans_Call {
+	_c.Call.Return(n, err)
+	return _c
+}
+
+func (_c *MockRepository_PruneOrphans_Call) RunAndReturn(run func(ctx context.Context) (int64, error)) *MockRepository_PruneOrphans_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Search provides a mock function for the type MockRepository
-func (_mock *MockRepository) Search(ctx context.Context, vector []float32, k int, authorUsername string) ([]model1.SearchResult, error) {
-	ret := _mock.Called(ctx, vector, k, authorUsername)
+func (_mock *MockRepository) Search(ctx context.Context, vector []float32, k int, authorID string) ([]model1.SearchResult, error) {
+	ret := _mock.Called(ctx, vector, k, authorID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Search")
@@ -720,17 +780,17 @@ func (_mock *MockRepository) Search(ctx context.Context, vector []float32, k int
 	var r0 []model1.SearchResult
 	var r1 error
 	if returnFunc, ok := ret.Get(0).(func(context.Context, []float32, int, string) ([]model1.SearchResult, error)); ok {
-		return returnFunc(ctx, vector, k, authorUsername)
+		return returnFunc(ctx, vector, k, authorID)
 	}
 	if returnFunc, ok := ret.Get(0).(func(context.Context, []float32, int, string) []model1.SearchResult); ok {
-		r0 = returnFunc(ctx, vector, k, authorUsername)
+		r0 = returnFunc(ctx, vector, k, authorID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]model1.SearchResult)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func(context.Context, []float32, int, string) error); ok {
-		r1 = returnFunc(ctx, vector, k, authorUsername)
+		r1 = returnFunc(ctx, vector, k, authorID)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -746,12 +806,12 @@ type MockRepository_Search_Call struct {
 //   - ctx context.Context
 //   - vector []float32
 //   - k int
-//   - authorUsername string
-func (_e *MockRepository_Expecter) Search(ctx any, vector any, k any, authorUsername any) *MockRepository_Search_Call {
-	return &MockRepository_Search_Call{Call: _e.mock.On("Search", ctx, vector, k, authorUsername)}
+//   - authorID string
+func (_e *MockRepository_Expecter) Search(ctx any, vector any, k any, authorID any) *MockRepository_Search_Call {
+	return &MockRepository_Search_Call{Call: _e.mock.On("Search", ctx, vector, k, authorID)}
 }
 
-func (_c *MockRepository_Search_Call) Run(run func(ctx context.Context, vector []float32, k int, authorUsername string)) *MockRepository_Search_Call {
+func (_c *MockRepository_Search_Call) Run(run func(ctx context.Context, vector []float32, k int, authorID string)) *MockRepository_Search_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -784,7 +844,7 @@ func (_c *MockRepository_Search_Call) Return(searchResults []model1.SearchResult
 	return _c
 }
 
-func (_c *MockRepository_Search_Call) RunAndReturn(run func(ctx context.Context, vector []float32, k int, authorUsername string) ([]model1.SearchResult, error)) *MockRepository_Search_Call {
+func (_c *MockRepository_Search_Call) RunAndReturn(run func(ctx context.Context, vector []float32, k int, authorID string) ([]model1.SearchResult, error)) *MockRepository_Search_Call {
 	_c.Call.Return(run)
 	return _c
 }

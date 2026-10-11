@@ -10,6 +10,54 @@ For releases prior to v4.6.5, see the [GitHub releases page](https://github.com/
 ## [Unreleased]
 
 
+## [5.8.0] - 2026-09-28
+
+### Changed
+
+* **Copilot is now admin-only.** The chat, session, and answer endpoints now require the site admin. Other signed-in users are refused before the SSE stream opens, and the client shows the server's message. Copilot spends the operator's model budget and reads and writes the owner's Echos, so being signed in is no longer enough.
+
+* **An empty context window now means a conservative 64k instead of 256k.** Copilot also plans a single budget across output, system prompt, history, and summary material. Set the window to your model's real limit; if it is set too high, requests fail as too long.
+
+* **Temperature is no longer guessed from the model name.** The built-in tables that decided which models accept sampling parameters were incomplete, and a wrong guess failed the request. They have been removed along with the hardcoded chat temperature, so models now run at their own default unless you set one (see below).
+
+* **Lower token cost on multi-round tool runs.** Streaming Anthropic requests put a cache breakpoint on the last block, so each tool round reads the previous round from the prompt cache. When old tool results have to be cleared, Copilot clears them down to 80% of the limit, so the following rounds append to the cached prompt instead of invalidating it again.
+
+### Added
+
+* **Optional temperature setting for the Copilot agent.** *Panel → Copilot* has a new **Temperature** field (0–2). If it is left empty, nothing is sent and the model uses its own default (recommended). If it is set, it applies to every agent call, including **Test connection**, so a value the model rejects is caught before you save.
+
+* **WebP support for vision requests.** WebP images are now decoded and, when large, downscaled like other formats instead of being sent as-is or dropped. Resampling now uses Catmull-Rom.
+
+### Fixed
+
+* **Copilot recovers from context overflows.** After the first reply, the budget is based on the input tokens the provider reports, and tool declarations now count toward it. If a request is rejected as too long before anything has streamed, Copilot trims it to three quarters of its size and retries once.
+
+* **Truncated answers are marked unfinished.** Every provider now reports when output was cut off by a length limit. Copilot then ends the run and drops that round's tool calls, whose arguments may be incomplete. A response stopped by a content filter is now reported as an error instead of a silently partial answer.
+
+* **Provider compatibility hardened.** Provider-specific assistant state is now passed back on tool rounds: DeepSeek `reasoning_content`, Claude signed thinking blocks, and encrypted reasoning items from the Responses API. The final forced-answer round now keeps tools declared with `tool_choice=none`; Anthropic rejects tool history without tool declarations. Parallel tool-call fragments are split by ID when a stream omits their index, and refusal stop reasons are shown instead of being hidden.
+
+* **Tool loop correctness.** Only successful tool calls whose results are still in context are deduplicated. Failed results are marked `is_error`. When trimming is needed, Copilot first clears older results, then images, and finally truncates the newest round instead of dropping it. Token estimates now account for CJK text.
+
+* **Conversation history always starts with a question.** History is now selected by whole turns, so it never begins partway through an exchange.
+
+* **Retrieval falls back to keyword search.** If semantic search fails, has no index yet, or returns too few results, Copilot falls back to keyword search or adds keyword results. An unknown tag name is now a tool error instead of silently broadening the query.
+
+* **Safer multimodal input.** Image formats are detected from file contents, only JPEG/PNG/GIF/WebP images are sent, large images are downscaled, and image bytes are capped per run.
+
+* **Recent summary cache fixes.** The cache now checks whether the feature is enabled, is tied to the setting that produced it, and is invalidated when an Echo is deleted.
+
+* **The semantic index stays consistent with live Echos.** Search hits are checked against the Echos table and filtered by user ID, so renaming an author no longer hides their Echos and deleted Echos never appear. Index writes happen in one transaction and only while the Echo still exists, closing a race with deletion; backfill removes orphaned rows. Search returns "index not ready" when no index matches the configured model and dimension instead of querying a missing or mismatched table. Backfill retries a failed batch item by item so one bad input no longer fails the whole page, and very long inputs are truncated.
+
+### Internal
+
+* **Go 1.27.1.** `go.mod`, the Docker builder image, CI workflows, and docs now target Go 1.27.1.
+* **Go 1.27 generic methods adopted.** Each job type is now bound to its payload at compile time through `jobModel.Kind[P]`, and `job.Manager` uses generic `Register`/`Submit`/`Get`/`Delete`/`Cancel`. `cache` is a concrete `*cache.Cache` with generic read-through methods and per-instance singleflight. Settings use `Spec[T]` methods with `Pristine()`.
+* **`pkg/app` and `pkg/egress` extracted.** The lifecycle core moved from `internal/app` to `pkg/app`, with Ech0's composition in `di.ProvideApp`, and `internal/util/egress` moved to `pkg/egress`.
+* **Per-run token logging.** Each agent run logs its round count and its input, cached, and output token totals.
+* **Interactive architecture diagram** published at [ech0.app/arch](https://ech0.app/arch). It covers the overall request flow and the internals of `pkg/` plus the event bus, webhooks, kvstore/settings/cache, visitor, job/task, and app lifecycle.
+* **Dependencies updated.** Go: `anthropic-sdk-go` 1.75.0, `openai-go/v3` 3.66.0, `aws-sdk-go-v2` 1.47.1 (`service/s3` 1.113.4), `go-webauthn/webauthn` 0.18.2, `go-oidc/v3` 3.21.0, and the `golang.org/x/*` modules; `golang.org/x/image` is a new dependency for WebP. Web: `unocss` 66.10.5, `eslint-plugin-vue` 10.11.1, and `prettier` 3.9.9, plus in-range `pnpm update` across `web/`, `hub/`, and `site/`.
+
+
 ## [5.7.0] - 2026-08-28
 
 ### Fixed

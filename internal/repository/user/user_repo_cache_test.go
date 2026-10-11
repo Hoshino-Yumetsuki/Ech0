@@ -17,14 +17,14 @@ import (
 	"gorm.io/gorm"
 )
 
-func newUserRepo(t *testing.T) (*UserRepository, *gorm.DB, cache.ICache[string, any]) {
+func newUserRepo(t *testing.T) (*UserRepository, *gorm.DB, *cache.Cache) {
 	t.Helper()
 	db := helpers.NewTestDB(t)
 	c := helpers.NewTestCache()
 	return NewUserRepository(func() *gorm.DB { return db }, c), db, c
 }
 
-func cacheGetUser(t *testing.T, c cache.ICache[string, any], key string) (any, bool) {
+func cacheGetUser(t *testing.T, c *cache.Cache, key string) (any, bool) {
 	t.Helper()
 	v, ok, err := c.Get(key)
 	require.NoError(t, err)

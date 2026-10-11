@@ -47,7 +47,6 @@ func Generate(
 	setting model.AgentSetting,
 	in []Message,
 	usePrompt bool,
-	temperature *float32,
 ) (string, error) {
 	if err := validate(setting); err != nil {
 		return "", err
@@ -59,8 +58,7 @@ func Generate(
 	}
 
 	resp, err := provider.Complete(ctx, Request{
-		Messages:    applyPrompt(setting, in, usePrompt),
-		Temperature: temperature,
+		Messages: applyPrompt(setting, in, usePrompt),
 	})
 	if err != nil {
 		return "", err
@@ -85,8 +83,7 @@ func Ping(ctx context.Context, setting model.AgentSetting) error {
 	}
 
 	_, err = provider.Complete(ctx, Request{
-		Messages:  []Message{{Role: RoleUser, Content: "ping"}},
-		MaxTokens: 16,
+		Messages: []Message{{Role: RoleUser, Content: "ping"}},
 	})
 	return err
 }

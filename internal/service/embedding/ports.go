@@ -20,7 +20,7 @@ type Service interface {
 	IndexEcho(ctx context.Context, echo echoModel.Echo) error
 	RemoveEcho(ctx context.Context, echoID string) error
 	Backfill(ctx context.Context, onProgress func(BackfillResult)) (BackfillResult, error)
-	Search(ctx context.Context, query string, k int, authorUsername string) ([]model.SearchResult, error)
+	Search(ctx context.Context, query string, k int, authorID string) ([]model.SearchResult, error)
 	Enabled(ctx context.Context) bool
 }
 
@@ -35,7 +35,8 @@ type Repository interface {
 	Upsert(ctx context.Context, meta *model.EchoEmbedding, vector []float32) error
 	Delete(ctx context.Context, echoID string) error
 	GetMeta(ctx context.Context, echoID string) (*model.EchoEmbedding, bool, error)
-	Search(ctx context.Context, vector []float32, k int, authorUsername string) ([]model.SearchResult, error)
+	Search(ctx context.Context, vector []float32, k int, authorID string) ([]model.SearchResult, error)
+	PruneOrphans(ctx context.Context) (int64, error)
 	ClearAll(ctx context.Context) error
 	Count(ctx context.Context) (int64, error)
 }

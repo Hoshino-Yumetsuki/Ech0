@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	settingModel "github.com/lin-snow/ech0/internal/model/setting"
 	openai "github.com/sashabaranov/go-openai"
@@ -17,9 +18,30 @@ var (
 	ErrNotEnabled    = errors.New("embedding: not enabled")
 	ErrModelMissing  = errors.New("embedding: model missing")
 	ErrEmptyResponse = errors.New("embedding: empty response")
+	ErrIndexNotReady = errors.New("embedding: index not built for the configured model")
 )
 
 const defaultBatchSize = 64
+
+// maxInputRunes caps one input. Embedding models reject inputs over their
+// context (8192 tokens for OpenAI's), and a CJK character is about a token, so
+// this stays under that limit for any text; a long post keeps its opening,
+// which is what a similarity search needs from it anyway.
+const maxInputRunes = 8000
+
+func clampInput(s string) string {
+	if utf8.RuneCountInString(s) <= maxInputRunes {
+		return s
+	}
+	n := 0
+	for i := range s {
+		if n == maxInputRunes {
+			return s[:i]
+		}
+		n++
+	}
+	return s
+}
 
 func Embed(
 	ctx context.Context,
@@ -52,7 +74,10 @@ func Embed(
 	out := make([][]float32, 0, len(inputs))
 	for start := 0; start < len(inputs); start += batchSize {
 		end := min(start+batchSize, len(inputs))
-		batch := inputs[start:end]
+		batch := make([]string, 0, end-start)
+		for _, in := range inputs[start:end] {
+			batch = append(batch, clampInput(in))
+		}
 
 		resp, err := client.CreateEmbeddings(ctx, openai.EmbeddingRequest{
 			Model:      openai.EmbeddingModel(setting.Model),

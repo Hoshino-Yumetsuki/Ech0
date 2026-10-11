@@ -40,6 +40,7 @@ type aggregateCoverage struct {
 func (s *CopilotService) summarizeEchosTool(
 	allTags []echoModel.Tag,
 	setting settingModel.AgentSetting,
+	material int,
 	locale string,
 	loc *time.Location,
 	user chatUser,
@@ -59,7 +60,10 @@ func (s *CopilotService) summarizeEchosTool(
 			if from == 0 && to == 0 {
 				return agent.ToolOutput{}, errors.New("summarize_echos 需要 date_from 与 date_to 指定时间区间")
 			}
-			tagIDs := resolveTagIDs(allTags, a.Tags)
+			tagIDs, err := resolveTagIDs(allTags, a.Tags, locale)
+			if err != nil {
+				return agent.ToolOutput{}, err
+			}
 
 			echos, total, truncated, err := s.collectRange(ctx, user.ID, tagIDs, from, to)
 			if err != nil {
@@ -67,7 +71,7 @@ func (s *CopilotService) summarizeEchosTool(
 			}
 			reverseEchos(echos)
 
-			material, buckets, err := s.mapReduceSummary(ctx, setting, locale, echos, aggregateBudgetTokens(setting), loc)
+			material, buckets, err := s.mapReduceSummary(ctx, setting, locale, echos, max(material, minAggregateBudget), loc)
 			if err != nil {
 				return agent.ToolOutput{}, err
 			}
@@ -140,7 +144,7 @@ func (s *CopilotService) mapReduceSummary(
 	loc *time.Location,
 ) (content string, buckets int, err error) {
 	full := formatEchosByMonth(echos, loc)
-	if estimateTokens(full) <= budget {
+	if agent.EstimateTokens(full) <= budget {
 		return full, 1, nil
 	}
 
@@ -150,7 +154,7 @@ func (s *CopilotService) mapReduceSummary(
 		digest, mErr := agent.Generate(ctx, setting, []agent.Message{
 			{Role: agent.RoleSystem, Content: aggregateMapPromptFor(locale)},
 			{Role: agent.RoleUser, Content: formatEchosByMonth(ch, loc)},
-		}, false, nil)
+		}, false)
 		if mErr != nil {
 			return "", 0, mErr
 		}
@@ -158,11 +162,11 @@ func (s *CopilotService) mapReduceSummary(
 	}
 	joined := strings.TrimSpace(b.String())
 
-	if estimateTokens(joined) > budget {
+	if agent.EstimateTokens(joined) > budget {
 		reduced, rErr := agent.Generate(ctx, setting, []agent.Message{
 			{Role: agent.RoleSystem, Content: aggregateReducePromptFor(locale)},
 			{Role: agent.RoleUser, Content: joined},
-		}, false, nil)
+		}, false)
 		if rErr != nil {
 			return "", 0, rErr
 		}
@@ -177,7 +181,7 @@ func chunkEchosByBudget(echos []echoModel.Echo, budget int, loc *time.Location) 
 	var cur []echoModel.Echo
 	curTokens := 0
 	for _, e := range echos {
-		t := estimateTokens(formatEchoLine(e, loc))
+		t := agent.EstimateTokens(formatEchoLine(e, loc))
 		if len(cur) > 0 && curTokens+t > budget {
 			chunks = append(chunks, cur)
 			cur = nil

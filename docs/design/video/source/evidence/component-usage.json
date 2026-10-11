@@ -1,0 +1,190 @@
+[
+  {
+    "shotId": "write",
+    "featureEntry": "web/src/views/home/HomeView.vue (?tab=publish)",
+    "components": [
+      "web/src/views/home/modules/HomePage.vue",
+      "web/src/views/home/modules/TheEditor.vue",
+      "web/src/views/home/modules/TheEditor/TheEditorButtons.vue",
+      "web/src/components/advanced/md/TheMdEditor.vue",
+      "web/src/views/home/modules/HomeHeader.vue",
+      "web/src/views/home/modules/HomeSidebarNav.vue",
+      "web/src/views/home/modules/TheEditor/TheMediaEditor.vue",
+      "web/src/components/advanced/TheUploader.vue",
+      "web/src/lib/file/useUpload.ts",
+      "web/src/views/home/modules/TheEditor/TheEditorMedia.vue"
+    ],
+    "styleEntries": [
+      "web/src/themes/index.scss",
+      "virtual:uno.css (web/uno.config.ts)",
+      "component <style scoped>"
+    ],
+    "stateDriver": "src/shots/home-layer.jsx driveHome(): native textarea setter + input event; real clicks on tag Popover, #notes chip, publish PopoverButton, 'Publish as public'; attach: real Add attachment/Back clicks, Video segmented tab, real DragEvent('drop') with the clip as a File on the uploader; progress via the film-time FilmXHR (src/fake-api.js)",
+    "adapters": [
+      "src/vue/bridge.ts (Pinia/i18n/router/FloatingVue boot)",
+      "src/fake-api.js + src/fixtures/api.js"
+    ],
+    "reuseMode": "direct mount",
+    "exceptions": [
+      "Toaster (vue-sonner) not mounted: publish toast not shown"
+    ]
+  },
+  {
+    "shotId": "land",
+    "featureEntry": "real navigation after publish (stores/editor jumpToHomeTimeline)",
+    "components": [
+      "web/src/views/home/modules/TheEchos.vue",
+      "web/src/components/advanced/echo/cards/TheEchoCard.vue"
+    ],
+    "styleEntries": [
+      "same"
+    ],
+    "stateDriver": "real publish flow; film camera wrapper",
+    "adapters": [
+      "echo rings overlay positioned on real .timeline-marker"
+    ],
+    "reuseMode": "direct mount",
+    "exceptions": []
+  },
+  {
+    "shotId": "detail",
+    "featureEntry": "web/src/views/echo/EchoView.vue (route /echo/:echoId, reached by a real click on the timeline time label)",
+    "components": [
+      "EchoPage.vue",
+      "TheEchoDetail.vue",
+      "TheEchoMeta.vue",
+      "TheShareEchoPanel.vue",
+      "TheEchoInteractions.vue",
+      "TheComment.vue"
+    ],
+    "styleEntries": [
+      "web/src/themes/index.scss",
+      "virtual:uno.css"
+    ],
+    "stateDriver": "src/shots/detail.jsx driveDetail(): real clicks (time label, share, copy link, like, Post comment, Submit, back) and native input setters for nickname/email/reply",
+    "adapters": [
+      "Ech0Bridge.setVisitor(true): signed-out reader view",
+      "fixtures: /echo/like/e-new, /comments (GET/POST), /echo/e-new"
+    ],
+    "reuseMode": "direct mount",
+    "exceptions": [
+      "\"A reader opens the shared link\" chip is a film caption, not product UI"
+    ]
+  },
+  {
+    "shotId": "stream",
+    "featureEntry": "home timeline",
+    "components": [
+      "TheEchos.vue",
+      "TheEchoCard.vue",
+      "WebsiteCard.vue",
+      "media gallery"
+    ],
+    "styleEntries": [
+      "same"
+    ],
+    "stateDriver": "scrollTop of real .home-main as a function of film time",
+    "adapters": [],
+    "reuseMode": "direct mount",
+    "exceptions": []
+  },
+  {
+    "shotId": "reach",
+    "featureEntry": "HomePage ?tab=status via real sidebar RouterLink click",
+    "components": [
+      "web/src/components/advanced/widget/TheHeatMap.vue",
+      "TheRecentCard.vue",
+      "TheConnectWidget.vue",
+      "TheCommentWidget.vue",
+      "HomeHeader.vue (RSS link)"
+    ],
+    "styleEntries": [
+      "same"
+    ],
+    "stateDriver": "real click; highlight boxes are a film overlay measured from real element rects",
+    "adapters": [
+      "fixture connects/comments/recap"
+    ],
+    "reuseMode": "direct mount",
+    "exceptions": []
+  },
+  {
+    "shotId": "copilot",
+    "featureEntry": "web/src/views/chat/modules/ChatPage.vue",
+    "components": [
+      "TheChatBox.vue",
+      "ChatRetrieval.vue",
+      "AnimatedMarkdown.vue",
+      "ChatSources.vue"
+    ],
+    "styleEntries": [
+      "same"
+    ],
+    "stateDriver": "real composer typing + Send click; SSE frames released by film time (src/fake-api.js chatStreamResponse); prefers-reduced-motion reported so reveal follows the stream",
+    "adapters": [
+      "matchMedia(prefers-reduced-motion) = reduce"
+    ],
+    "reuseMode": "direct mount",
+    "exceptions": [
+      "answer text scripted"
+    ]
+  },
+  {
+    "shotId": "panel",
+    "featureEntry": "web/src/views/panel/PanelView.vue (mounted with viewDepthKey=1 so its RouterView renders child pages)",
+    "components": [
+      "PanelPage.vue",
+      "TheDashboard.vue",
+      "TheCommentManager.vue",
+      "TheStorage.vue → TheStorageFileList.vue",
+      "TheExtension.vue → TheMCPSetting.vue",
+      "TheSystemLog.vue",
+      "components/common/BaseSegmented.vue"
+    ],
+    "styleEntries": [
+      "web/src/themes/index.scss",
+      "virtual:uno.css"
+    ],
+    "stateDriver": "src/shots/panel.jsx drivePanel(): real clicks on panel nav buttons, segmented tabs, file-tree rows; live log lines via a film-time WebSocket (src/fake-api.js FilmSocket)",
+    "adapters": [
+      "src/fixtures/panel.js",
+      "src/fixtures/mcp-manifest.json (real, from internal/mcp)",
+      "demo origin https://mira.example via Playwright routing (server.mjs openFilm)"
+    ],
+    "reuseMode": "direct mount",
+    "exceptions": [
+      "welcome header / nav are masked out (framing only) while the caption is folded / in Keep"
+    ]
+  },
+  {
+    "shotId": "own",
+    "featureEntry": "PanelView → /panel/data-management (Export tab)",
+    "components": [
+      "TheDataManagement.vue",
+      "TheSetting/TheExportSetting.vue"
+    ],
+    "styleEntries": [
+      "same"
+    ],
+    "stateDriver": "real nav + tab clicks",
+    "adapters": [],
+    "reuseMode": "direct mount",
+    "exceptions": [
+      "docker command card is a film title card (README text), not product UI"
+    ]
+  },
+  {
+    "shotId": "open/echo/close",
+    "featureEntry": null,
+    "components": [
+      "web/public/Ech0.svg geometry (redrawn as separate strokes)"
+    ],
+    "styleEntries": [
+      "src/film.css"
+    ],
+    "stateDriver": "GSAP master timeline",
+    "adapters": [],
+    "reuseMode": "brand title cards",
+    "exceptions": []
+  }
+]

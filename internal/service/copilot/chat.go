@@ -17,11 +17,10 @@ import (
 	commonModel "github.com/lin-snow/ech0/internal/model/common"
 	embeddingModel "github.com/lin-snow/ech0/internal/model/embedding"
 	settingModel "github.com/lin-snow/ech0/internal/model/setting"
+	userModel "github.com/lin-snow/ech0/internal/model/user"
 	timezoneUtil "github.com/lin-snow/ech0/internal/util/timezone"
 	"github.com/lin-snow/ech0/pkg/viewer"
 )
-
-const chatTemperature float32 = 0.4
 
 func (s *CopilotService) agentSetting(ctx context.Context) (settingModel.AgentSetting, error) {
 	var setting settingModel.AgentSetting
@@ -35,10 +34,35 @@ func (s *CopilotService) agentSetting(ctx context.Context) (settingModel.AgentSe
 	return setting, nil
 }
 
+// requireAdmin admits the site owner and nobody else.
+//
+// Copilot spends the operator's own model budget and reads and writes the
+// owner's Echos, so being signed in is not enough. The admin:settings scope on
+// the routes only binds access tokens — a session token passes scope checks by
+// design — which is why the check lives here, beside every entry point, the
+// same way the other settings services do it.
+func (s *CopilotService) requireAdmin(ctx context.Context) (userModel.User, error) {
+	user, err := s.userReader.GetUserByID(viewer.MustFromContext(ctx).UserID())
+	if err != nil {
+		return userModel.User{}, err
+	}
+	if !user.IsAdmin {
+		return userModel.User{}, errors.New(commonModel.NO_PERMISSION_DENIED)
+	}
+	return user, nil
+}
+
+// AskStream answers one question over SSE. An error it returns means nothing
+// has been written yet, so the caller can still answer with a plain HTTP
+// error; once the stream is open, failures travel as SSE error events.
 func (s *CopilotService) AskStream(ctx context.Context, question string, locale string, timezone string, w http.ResponseWriter) error {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		return errors.New("streaming unsupported")
+	}
+	currentUser, err := s.requireAdmin(ctx)
+	if err != nil {
+		return err
 	}
 
 	h := w.Header()
@@ -53,12 +77,7 @@ func (s *CopilotService) AskStream(ctx context.Context, question string, locale 
 		return nil
 	}
 
-	userID := viewer.MustFromContext(ctx).UserID()
-	currentUser, err := s.userReader.GetUserByID(userID)
-	if err != nil {
-		writeSSE(w, flusher, "error", map[string]string{"message": err.Error()})
-		return nil
-	}
+	userID := currentUser.ID
 	user := chatUser{ID: currentUser.ID, Username: currentUser.Username}
 	var assistantBuf strings.Builder
 	var collectedSources []embeddingModel.SearchResult
@@ -86,10 +105,6 @@ func (s *CopilotService) AskStream(ctx context.Context, question string, locale 
 	today := time.Now().UTC().In(loc).Format("2006-01-02")
 	tagNames := tagNamesForPrompt(allTags)
 
-	historyBudget := max(maxHistoryTokens-estimateTokens(buildSystemPrompt(locale, today, tagNames, currentUser.Username))-toolDefTokenEstimate, minHistoryTokens)
-
-	history := historyForModel(s.loadSession(ctx, userID), locale, historyBudget, loc)
-
 	askEvents := make(chan askEvent, 4)
 	ask := &asker{
 		registry: s.asks,
@@ -99,24 +114,33 @@ func (s *CopilotService) AskStream(ctx context.Context, question string, locale 
 		strs:     askStringsFor(locale),
 	}
 
-	temp := chatTemperature
-	stream, err := agent.Run(ctx, agent.RunRequest{
-		Setting:  agentSetting,
-		Messages: buildChatMessages(history, question, locale, today, tagNames, currentUser.Username),
-		Tools: []agent.Tool{
+	tools := func(material int) []agent.Tool {
+		return []agent.Tool{
 			s.searchEchosTool(allTags, agentSetting.Multimodal, locale, loc, agentSetting.ContextWindow, user),
-			s.summarizeEchosTool(allTags, agentSetting, locale, loc, user),
+			s.summarizeEchosTool(allTags, agentSetting, material, locale, loc, user),
 			s.statsOverviewTool(allTags, locale, loc, user),
 			s.askUserTool(ask, locale),
 			s.createEchoTool(ask, locale, loc),
 			s.updateEchoTool(ask, locale, loc),
 			s.deleteEchoTool(ask, locale, loc),
-		},
+		}
+	}
+	// The declarations do not depend on the material budget, so a first build
+	// prices them and the second carries the budget they leave room for.
+	systemPrompt := buildSystemPrompt(locale, today, tagNames, currentUser.Username)
+	plan := planContext(agentSetting.ContextWindow,
+		agent.EstimateTokens(systemPrompt)+agent.ToolDefTokens(tools(0))+agent.EstimateTokens(question))
+
+	history := historyForModel(s.loadSession(ctx, userID), locale, plan.History, loc)
+
+	stream, err := agent.Run(ctx, agent.RunRequest{
+		Setting:          agentSetting,
+		Messages:         buildChatMessages(history, question, locale, today, tagNames, currentUser.Username),
+		Tools:            tools(plan.Material),
 		MaxRounds:        config.Config().Agent.MaxRounds,
-		Temp:             &temp,
 		Strings:          runStringsFor(locale),
 		Timeout:          time.Duration(config.Config().Agent.TimeoutSeconds) * time.Second,
-		MaxContextTokens: chatContextBudgetTokens(agentSetting),
+		MaxContextTokens: plan.Input,
 	})
 	if err != nil {
 		writeSSE(w, flusher, "error", map[string]string{"message": err.Error()})

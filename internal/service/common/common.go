@@ -17,21 +17,21 @@ import (
 	commonModel "github.com/lin-snow/ech0/internal/model/common"
 	userModel "github.com/lin-snow/ech0/internal/model/user"
 	"github.com/lin-snow/ech0/internal/storage"
-	"github.com/lin-snow/ech0/internal/util/egress"
 	mdUtil "github.com/lin-snow/ech0/internal/util/md"
 	timezoneUtil "github.com/lin-snow/ech0/internal/util/timezone"
 	urlUtil "github.com/lin-snow/ech0/internal/util/url"
+	"github.com/lin-snow/ech0/pkg/egress"
 	"golang.org/x/net/html"
 )
 
 type CommonService struct {
 	commonRepository CommonRepository
-	cache            cache.ICache[string, any]
+	cache            *cache.Cache
 }
 
 func NewCommonService(
 	commonRepository CommonRepository,
-	cache cache.ICache[string, any],
+	cache *cache.Cache,
 ) *CommonService {
 	return &CommonService{
 		commonRepository: commonRepository,
@@ -85,8 +85,7 @@ func (s *CommonService) GenerateRSS(ctx *gin.Context) (string, error) {
 	host := ctx.Request.Host
 	cacheKey := "rss:" + schema + ":" + host
 
-	return cache.ReadThroughTyped[string](
-		s.cache,
+	return s.cache.ReadThrough(
 		cacheKey,
 		1,
 		func() (string, error) {

@@ -18,74 +18,69 @@ type Spec[T any] struct {
 	Migrate   func(context.Context, kvstore.Store) (T, bool)
 }
 
-func Get[T any](ctx context.Context, kv kvstore.Store, spec Spec[T]) (T, error) {
-	raw, err := kv.Get(ctx, spec.Key)
+// Get reads the stored value, falling back to Pristine when the key is missing
+// (no error) or unreadable (with the error).
+func (s Spec[T]) Get(ctx context.Context, kv kvstore.Store) (T, error) {
+	raw, err := kv.Get(ctx, s.Key)
+	if errors.Is(err, kvstore.ErrNotFound) {
+		return s.Pristine(), nil
+	}
 	if err != nil {
-		v := spec.Default()
-		if spec.Normalize != nil {
-			spec.Normalize(&v)
-		}
-		if errors.Is(err, kvstore.ErrNotFound) {
-			return v, nil
-		}
-		return v, err
+		return s.Pristine(), err
 	}
 
 	var v T
 	if err := json.Unmarshal([]byte(raw), &v); err != nil {
-		v = spec.Default()
-		if spec.Normalize != nil {
-			spec.Normalize(&v)
-		}
-		return v, err
+		return s.Pristine(), err
 	}
-	if spec.Normalize != nil {
-		spec.Normalize(&v)
-	}
+	s.normalize(&v)
 	return v, nil
 }
 
-func Set[T any](ctx context.Context, kv kvstore.Store, spec Spec[T], value T) error {
-	if spec.Normalize != nil {
-		spec.Normalize(&value)
-	}
+func (s Spec[T]) Set(ctx context.Context, kv kvstore.Store, value T) error {
+	s.normalize(&value)
 	buf, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	return kv.Set(ctx, spec.Key, string(buf))
+	return kv.Set(ctx, s.Key, string(buf))
+}
+
+// Pristine is the normalized default: what Get yields before anything is stored.
+func (s Spec[T]) Pristine() T {
+	v := s.Default()
+	s.normalize(&v)
+	return v
+}
+
+func (s Spec[T]) normalize(v *T) {
+	if s.Normalize != nil {
+		s.Normalize(v)
+	}
 }
 
 type seedable interface {
 	seed(ctx context.Context, kv kvstore.Store) error
 }
 
+// seed writes the initial value once: migrated from legacy storage when
+// possible, otherwise the default. An existing value is left untouched.
 func (s Spec[T]) seed(ctx context.Context, kv kvstore.Store) error {
-	if _, err := kv.Get(ctx, s.Key); err == nil {
-		return nil
-	} else if !errors.Is(err, kvstore.ErrNotFound) {
+	if _, err := kv.Get(ctx, s.Key); !errors.Is(err, kvstore.ErrNotFound) {
 		return err
 	}
 
-	var v T
+	var (
+		v        T
+		migrated bool
+	)
 	if s.Migrate != nil {
-		if migrated, ok := s.Migrate(ctx, kv); ok {
-			v = migrated
-		} else {
-			v = s.Default()
-		}
-	} else {
+		v, migrated = s.Migrate(ctx, kv)
+	}
+	if !migrated {
 		v = s.Default()
 	}
-	if s.Normalize != nil {
-		s.Normalize(&v)
-	}
-
-	buf, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	return kv.Set(ctx, s.Key, string(buf))
+	return s.Set(ctx, kv, v)
 }
 
 func Seed(ctx context.Context, kv kvstore.Store) error {

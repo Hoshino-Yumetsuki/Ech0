@@ -82,9 +82,9 @@ func Set[T any](ctx context.Context, kv kvstore.Store, spec Spec[T], value T) er
 - 单次 `Set` 是一次 upsert，单语句本身就原子，**不强制要事务**；
 - 真正需要事务的是 **read-modify-write 复合**或**一次写多个 key**——而那应该发生在 service 层（实测分布与判断口诀见 §4「进阶：写设置时要不要 transactor」）。
 
-配套细节：`KeyValueRepository` 的读路径带读穿透缓存，但 `ReadThroughTypedUnlessTx` 在 `transaction.HasTx(ctx)` 为真时**直接走 DB 绕过缓存**（`cache/patterns.go:25`），避免事务内读到事务外的旧缓存。这让「事务随 ctx 流下去」这条链在缓存层也保持一致。
+配套细节：`KeyValueRepository` 的读路径带读穿透缓存，但 `Cache.ReadThroughUnlessTx` 在 `transaction.HasTx(ctx)` 为真时**直接走 DB 绕过缓存**（`cache/patterns.go:22`），避免事务内读到事务外的旧缓存。这让「事务随 ctx 流下去」这条链在缓存层也保持一致。
 
-**Seed 不归 service。** `setting.Seed(ctx, durableKV)` 由应用生命周期层在 `BeforeStart` 直接调（`internal/app/provider.go:33`），启动期把缺失的 key 幂等落库一次（绝不覆盖用户值），**绕开 SettingService**。所以 SettingService 只用到 `internal/setting` 的 **Get / Set**，不碰 Seed。
+**Seed 不归 service。** `setting.Seed(ctx, durableKV)` 由应用生命周期层在 `BeforeStart` 直接调（`internal/di/wire.go` 的 `ProvideApp`），启动期把缺失的 key 幂等落库一次（绝不覆盖用户值），**绕开 SettingService**。所以 SettingService 只用到 `internal/setting` 的 **Get / Set**，不碰 Seed。
 
 ---
 
@@ -94,14 +94,14 @@ func Set[T any](ctx context.Context, kv kvstore.Store, spec Spec[T], value T) er
 
 ```
 coreSetting.Set  →  只出现在 internal/service/setting/*（全部 9 处都在 setting 域内）
-coreSetting.Get  →  散落各处：storage/manager、task/scheduled、auth、comment、
+coreSetting.Xxx.Get  →  散落各处：storage/manager、task/scheduled、auth、comment、
                     embedding、connect、event/subscriber/agent、setting 域 …
 ```
 
 **为什么读能直连：** 两个理由，第二个是硬约束：
 
 1. `Get` 是纯读、无副作用、无原子性顾虑，任意层持有 `durableKV` 即可直接调，不必为读去拉 `SettingService`。
-2. **断 DI 构造环。** 跨域读设置时，若依赖整个 `SettingService`，很容易撞上构造期循环——`SettingService` 用到某域、该域又回头依赖 `SettingService`。直接 `coreSetting.Get(ctx, durableKV, …)` 从根上切断它。`internal/task/scheduled/snapshot.go:26` 的注释就是现成例子：「计划配置统一经 setting 引擎读 durableKV（而非依赖整个 SettingService），从根上断开『SettingService → Snapshot → SettingService』的构造环」。所以「读直连」常常不是风格选择，而是**唯一能避免 Wire 成环的写法**。
+2. **断 DI 构造环。** 跨域读设置时，若依赖整个 `SettingService`，很容易撞上构造期循环——`SettingService` 用到某域、该域又回头依赖 `SettingService`。直接 `coreSetting.Xxx.Get(ctx, durableKV)` 从根上切断它。`internal/task/scheduled/snapshot.go:26` 的注释就是现成例子：「计划配置统一经 setting 引擎读 durableKV（而非依赖整个 SettingService），从根上断开『SettingService → Snapshot → SettingService』的构造环」。所以「读直连」常常不是风格选择，而是**唯一能避免 Wire 成环的写法**。
 
 **为什么写要走 `SettingService`：** 「改设置」几乎从不是「单纯写一下」。看 `SettingService` 持有的依赖就懂了——它握着 `storageManager` / `webhookSender` / `tokenRevoker` / `bus`。一次设置写通常裹着：
 
@@ -115,7 +115,7 @@ coreSetting.Get  →  散落各处：storage/manager、task/scheduled、auth、c
 
 | 我要做的事 | 怎么做 | 依赖什么 |
 |---|---|---|
-| 读某个设置块（如系统设置、Comment、Embedding 配置） | 直接 `coreSetting.Get(ctx, durableKV, coreSetting.Xxx)` | 持有 `durableKV kvstore.Store` |
+| 读某个设置块（如系统设置、Comment、Embedding 配置） | 直接 `coreSetting.Xxx.Get(ctx, durableKV)` | 持有 `durableKV kvstore.Store` |
 | 改设置（带鉴权/原子性/副作用） | 注入并调用 `SettingService` 的对应方法 | 依赖 `setting` 域服务 |
 | 启动期补齐默认值 | 不用自己做，`setting.Seed` 已在 `BeforeStart` 处理 | —— |
 | 真·零鉴权零副作用的单 key 裸写（极罕见） | 技术上可 `coreSetting.Set`，但请先确认确实无任何副作用 | —— |
@@ -145,19 +145,19 @@ coreSetting.Get  →  散落各处：storage/manager、task/scheduled、auth、c
 > - `internal/repository/setting`、`internal/repository/webhook`：`var _ settingService.SettingRepository = (*…)(nil)` / `WebhookRepository`——这是 setting 服务在 `ports.go` 声明的「我需要的仓储长这样」**端口接口**，repo 在编译期断言自己满足它。箭头朝内（依赖倒置），与「依赖 SettingService」方向相反。
 > - `internal/repository/provider.go`、`internal/service/provider.go`、`internal/di/wire_gen.go`：纯 Wire 接线（`wire.Bind` / `NewSettingService`）。
 >
-> 其余领域（storage/manager、task/scheduled/snapshot、embedding、connect、auth、comment、user、event/subscriber/agent）一律 `coreSetting.Get` 直连，**没有一个为读去依赖 `SettingService`**——所以本文这套规约是对现状的如实描述，不是待办。
+> 其余领域（storage/manager、task/scheduled/snapshot、embedding、connect、auth、comment、user、event/subscriber/agent）一律 `coreSetting.Xxx.Get` 直连，**没有一个为读去依赖 `SettingService`**——所以本文这套规约是对现状的如实描述，不是待办。
 
 ---
 
 ## 5. 案例：让 UserService「只依赖 internal/setting」时，那次设置写该安在哪
 
-目标：让 `user` 域只经 `coreSetting.Get` 直读、**不依赖 `SettingService`**。`UserService` 原本用 `SettingService` 两件事——`Register` 读 `AllowRegister`（纯读，直接换 `coreSetting.Get` 即可），以及 `InitOwner` 调 `BootstrapDefaultLocale`（写）。难点全在后者：它是 setting 域的**写行为**，按 §4「写走域」不能内联进 user。
+目标：让 `user` 域只经 `coreSetting.Xxx.Get` 直读、**不依赖 `SettingService`**。`UserService` 原本用 `SettingService` 两件事——`Register` 读 `AllowRegister`（纯读，直接换 `coreSetting.Xxx.Get` 即可），以及 `InitOwner` 调 `BootstrapDefaultLocale`（写）。难点全在后者：它是 setting 域的**写行为**，按 §4「写走域」不能内联进 user。
 
 `BootstrapDefaultLocale`（`internal/service/setting/system_setting_service.go:35`）是一段 **read-modify-write 原子操作**：
 
 ```go
 return s.transactor.Run(ctx, func(ctx context.Context) error {        // ← 开事务
-    current, err := coreSetting.Get(ctx, s.durableKV, coreSetting.System)
+    current, err := coreSetting.System.Get(ctx, s.durableKV)
     if err != nil { return err }
     if i18nUtil.ResolveLocale(current.DefaultLocale) != string(commonModel.DefaultLocale) {
         return nil                                                     // ← 站长已手动改过就不覆盖
@@ -175,16 +175,16 @@ return s.transactor.Run(ctx, func(ctx context.Context) error {        // ← 开
 
 落地结果：
 
-- `UserService`：删掉 `BootstrapDefaultLocale` 调用；`Register` 改 `coreSetting.Get`；字段 `settingService` 换成 `durableKV`。**自此只依赖 `internal/setting`。**
+- `UserService`：删掉 `BootstrapDefaultLocale` 调用；`Register` 改 `coreSetting.Xxx.Get`；字段 `settingService` 换成 `durableKV`。**自此只依赖 `internal/setting`。**
 - `InitService`：注入 `SettingService`，在 `InitOwner` 里 `userService.InitOwner(...)` 成功后调 `BootstrapDefaultLocale`（best-effort，失败仅告警）。它本就是「首次建站编排器」，协调 user（建 owner）+ setting（站点默认语言）两域，这是该行为的天然归属。
 
-**心法：** 当某域想摆脱对 `SettingService` 的依赖时，先分清它要的是**读**还是**写行为**。读直接 `coreSetting.Get`；写不能内联（违反写走域），而该把**调用点**安放到一个「本就持有 `SettingService` 的编排层」——而不是硬把 `SettingService` 拖进一个不该有它的精简注入器。`InitService` 之于建站，正是这样的编排层。
+**心法：** 当某域想摆脱对 `SettingService` 的依赖时，先分清它要的是**读**还是**写行为**。读直接 `coreSetting.Xxx.Get`；写不能内联（违反写走域），而该把**调用点**安放到一个「本就持有 `SettingService` 的编排层」——而不是硬把 `SettingService` 拖进一个不该有它的精简注入器。`InitService` 之于建站，正是这样的编排层。
 
 ---
 
 ## 速查
 
 - 找默认值 → `internal/config/config.go` + `internal/setting/registry.go` 的 `Spec.Default()`。
-- 加一个新设置项 → 在 `registry.go` 加 `Spec[T]`（key + Default + Normalize），seeder 自动落库；读处直接 `coreSetting.Get`，写处走 `SettingService`。
+- 加一个新设置项 → 在 `registry.go` 加 `Spec[T]`（key + Default + Normalize），seeder 自动落库；读处直接 `coreSetting.Xxx.Get`，写处走 `SettingService`。
 - 事务为什么「凭空生效」→ `transactor.Run` 把 tx 塞进 `ctx`，repo 的 `getDB(ctx)` 捞出来用；中间各层只转发 `ctx`。
 - token 重启就失效 → `JWT_SECRET` 没设，被 `getJWTSecret` 随机生成了（`config.go:320`）。

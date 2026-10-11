@@ -112,7 +112,7 @@ func (s *MigratorService) UploadSourceZip(
 	if !user.IsAdmin {
 		return migratorModel.UploadMigrationSourceZipResponse{}, errors.New(commonModel.NO_PERMISSION_DENIED)
 	}
-	if _, err := s.jobManager.Get(ctx, jobModel.TypeMigration); err == nil {
+	if _, err := s.jobManager.Get(ctx, jobModel.Migration); err == nil {
 		return migratorModel.UploadMigrationSourceZipResponse{}, errors.New("请先结束/清理当前迁移")
 	} else if !errors.Is(err, job.ErrNotFound) {
 		return migratorModel.UploadMigrationSourceZipResponse{}, err
@@ -171,15 +171,10 @@ func (s *MigratorService) StartGlobalMigration(
 	if _, ok := sourcePayload["created_by"]; !ok {
 		sourcePayload["created_by"] = adminUserID
 	}
-	raw, err := json.Marshal(migratorModel.MigrationPayload{
+	jb, err := s.jobManager.Submit(ctx, jobModel.Migration, migratorModel.MigrationPayload{
 		SourceType:    strings.TrimSpace(req.SourceType),
 		SourcePayload: sourcePayload,
 	})
-	if err != nil {
-		return migratorModel.GlobalMigrationStateDTO{}, err
-	}
-
-	jb, err := s.jobManager.Submit(ctx, jobModel.TypeMigration, raw)
 	if err != nil {
 		_ = coreMigrator.CleanupTmpDirFromPayload(req.SourcePayload)
 		if errors.Is(err, job.ErrAlreadyRunning) {
@@ -194,7 +189,7 @@ func (s *MigratorService) GetGlobalMigrationStatus(ctx context.Context) (migrato
 	if _, err := s.ensureAdmin(ctx); err != nil {
 		return migratorModel.GlobalMigrationStateDTO{}, err
 	}
-	jb, err := s.jobManager.Get(ctx, jobModel.TypeMigration)
+	jb, err := s.jobManager.Get(ctx, jobModel.Migration)
 	if errors.Is(err, job.ErrNotFound) {
 		return migratorModel.GlobalMigrationStateDTO{Version: 1, Status: migratorModel.MigrationStatusIdle}, nil
 	}
@@ -208,7 +203,7 @@ func (s *MigratorService) CancelGlobalMigration(ctx context.Context) (migratorMo
 	if _, err := s.ensureAdmin(ctx); err != nil {
 		return migratorModel.GlobalMigrationStateDTO{}, err
 	}
-	jb, err := s.jobManager.Get(ctx, jobModel.TypeMigration)
+	jb, err := s.jobManager.Get(ctx, jobModel.Migration)
 	if errors.Is(err, job.ErrNotFound) {
 		return migratorModel.GlobalMigrationStateDTO{}, errors.New(commonModel.INVALID_REQUEST_BODY)
 	}
@@ -218,8 +213,8 @@ func (s *MigratorService) CancelGlobalMigration(ctx context.Context) (migratorMo
 	if jb.Status != jobModel.StatusPending && jb.Status != jobModel.StatusRunning {
 		return migratorModel.GlobalMigrationStateDTO{}, errors.New(commonModel.INVALID_REQUEST_BODY)
 	}
-	_ = s.jobManager.Cancel(jobModel.TypeMigration)
-	jb, err = s.jobManager.Get(ctx, jobModel.TypeMigration)
+	_ = s.jobManager.Cancel(jobModel.Migration)
+	jb, err = s.jobManager.Get(ctx, jobModel.Migration)
 	if err != nil {
 		return migratorModel.GlobalMigrationStateDTO{}, err
 	}
@@ -230,7 +225,7 @@ func (s *MigratorService) CleanupGlobalMigration(ctx context.Context) error {
 	if _, err := s.ensureAdmin(ctx); err != nil {
 		return err
 	}
-	jb, err := s.jobManager.Get(ctx, jobModel.TypeMigration)
+	jb, err := s.jobManager.Get(ctx, jobModel.Migration)
 	if errors.Is(err, job.ErrNotFound) {
 		return nil
 	}
@@ -247,7 +242,7 @@ func (s *MigratorService) CleanupGlobalMigration(ctx context.Context) error {
 	if err := coreMigrator.CleanupTmpDirFromPayload(payload.SourcePayload); err != nil {
 		return fmt.Errorf("cleanup migration tmp dir: %w", err)
 	}
-	return s.jobManager.Delete(ctx, jobModel.TypeMigration)
+	return s.jobManager.Delete(ctx, jobModel.Migration)
 }
 
 func (s *MigratorService) StartExport(
@@ -261,14 +256,10 @@ func (s *MigratorService) StartExport(
 	if err != nil {
 		return migratorModel.ExportStateDTO{}, err
 	}
-	raw, err := json.Marshal(migratorModel.ExportPayload{
+	jb, err := s.jobManager.Submit(ctx, jobModel.Export, migratorModel.ExportPayload{
 		Format:         format,
 		IncludePrivate: format == migratorModel.ExportFormatCapsule && req.IncludePrivate,
 	})
-	if err != nil {
-		return migratorModel.ExportStateDTO{}, err
-	}
-	jb, err := s.jobManager.Submit(ctx, jobModel.TypeExport, raw)
 	if err != nil {
 		if errors.Is(err, job.ErrAlreadyRunning) {
 			return migratorModel.ExportStateDTO{}, errors.New("导出进行中，请稍候")
@@ -282,7 +273,7 @@ func (s *MigratorService) GetExportStatus(ctx context.Context) (migratorModel.Ex
 	if _, err := s.ensureAdmin(ctx); err != nil {
 		return migratorModel.ExportStateDTO{}, err
 	}
-	jb, err := s.jobManager.Get(ctx, jobModel.TypeExport)
+	jb, err := s.jobManager.Get(ctx, jobModel.Export)
 	if errors.Is(err, job.ErrNotFound) {
 		return migratorModel.ExportStateDTO{Version: 1, Status: migratorModel.MigrationStatusIdle}, nil
 	}
@@ -296,7 +287,7 @@ func (s *MigratorService) CancelExport(ctx context.Context) (migratorModel.Expor
 	if _, err := s.ensureAdmin(ctx); err != nil {
 		return migratorModel.ExportStateDTO{}, err
 	}
-	jb, err := s.jobManager.Get(ctx, jobModel.TypeExport)
+	jb, err := s.jobManager.Get(ctx, jobModel.Export)
 	if errors.Is(err, job.ErrNotFound) {
 		return migratorModel.ExportStateDTO{}, errors.New(commonModel.INVALID_REQUEST_BODY)
 	}
@@ -306,8 +297,8 @@ func (s *MigratorService) CancelExport(ctx context.Context) (migratorModel.Expor
 	if jb.Status != jobModel.StatusPending && jb.Status != jobModel.StatusRunning {
 		return migratorModel.ExportStateDTO{}, errors.New(commonModel.INVALID_REQUEST_BODY)
 	}
-	_ = s.jobManager.Cancel(jobModel.TypeExport)
-	jb, err = s.jobManager.Get(ctx, jobModel.TypeExport)
+	_ = s.jobManager.Cancel(jobModel.Export)
+	jb, err = s.jobManager.Get(ctx, jobModel.Export)
 	if err != nil {
 		return migratorModel.ExportStateDTO{}, err
 	}

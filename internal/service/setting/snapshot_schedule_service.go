@@ -19,7 +19,7 @@ import (
 func (settingService *SettingService) GetSnapshotScheduleSetting(
 	setting *model.SnapshotSchedule,
 ) error {
-	v, err := coreSetting.Get(context.Background(), settingService.durableKV, coreSetting.Snapshot)
+	v, err := coreSetting.Snapshot.Get(context.Background(), settingService.durableKV)
 	if err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func (settingService *SettingService) UpdateSnapshotScheduleSetting(
 		return errors.New(commonModel.INVALID_CRON_EXPRESSION)
 	}
 
-	if err := coreSetting.Set(ctx, settingService.durableKV, coreSetting.Snapshot, updated); err != nil {
+	if err := coreSetting.Snapshot.Set(ctx, settingService.durableKV, updated); err != nil {
 		return err
 	}
 

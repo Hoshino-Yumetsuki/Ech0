@@ -535,7 +535,7 @@ func (s *CommentService) GetSystemSetting(ctx context.Context) (model.SystemSett
 }
 
 func (s *CommentService) getSystemSettingRaw(ctx context.Context) (model.SystemSetting, error) {
-	return coreSetting.Get(ctx, s.durableKV, coreSetting.Comment)
+	return coreSetting.Comment.Get(ctx, s.durableKV)
 }
 
 func (s *CommentService) UpdateSystemSetting(ctx context.Context, setting model.SystemSetting) error {

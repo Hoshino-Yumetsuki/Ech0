@@ -15,7 +15,20 @@ import (
 	model "github.com/lin-snow/ech0/internal/model/setting"
 )
 
-const anthropicDefaultMaxTokens = 4096
+// anthropicMaxTokens is the output ceiling the API requires on every request.
+// It is a ceiling, not a target, and a low one truncates long summaries and
+// the thinking current models do by default before answering.
+const anthropicMaxTokens = 16_000
+
+var errAnthropicRefusal = errors.New("anthropic: 模型拒绝回答该请求（stop_reason=refusal）")
+
+// anthropicTurn is an assistant turn exactly as the API returned it. Replaying
+// it verbatim is the documented way to continue a tool loop: it keeps the
+// signed thinking blocks current models produce by default, which the API
+// requires back unchanged on the turn that called the tools.
+type anthropicTurn struct {
+	content []anthropic.ContentBlockParamUnion
+}
 
 type anthropicProvider struct {
 	setting model.AgentSetting
@@ -32,13 +45,9 @@ func (p *anthropicProvider) newClient() anthropic.Client {
 func (p *anthropicProvider) buildParams(req Request) anthropic.MessageNewParams {
 	systemBlocks, msgs := p.buildMessages(req.Messages)
 
-	maxTokens := int64(anthropicDefaultMaxTokens)
-	if req.MaxTokens > 0 {
-		maxTokens = int64(req.MaxTokens)
-	}
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(p.setting.Model),
-		MaxTokens: maxTokens,
+		MaxTokens: anthropicMaxTokens,
 		Messages:  msgs,
 	}
 	if len(systemBlocks) > 0 {
@@ -47,11 +56,37 @@ func (p *anthropicProvider) buildParams(req Request) anthropic.MessageNewParams 
 	}
 	if tools := p.buildTools(req.Tools); len(tools) > 0 {
 		params.Tools = tools
+		if req.ToolChoice == ToolChoiceNone {
+			params.ToolChoice = anthropic.ToolChoiceUnionParam{OfNone: &anthropic.ToolChoiceNoneParam{}}
+		}
 	}
-	if req.Temperature != nil {
-		params.Temperature = param.NewOpt(float64(*req.Temperature))
+	if t := p.setting.Temperature; t != nil {
+		params.Temperature = param.NewOpt(*t)
 	}
 	return params
+}
+
+// markCacheTail puts a cache breakpoint on the request's last block.
+//
+// The breakpoint on the system prompt covers only the tools and the prompt. A
+// tool loop resends the whole conversation every round, and without a
+// breakpoint at its end each round pays full price for everything the round
+// before already sent. Placed on the last block, it moves forward with the
+// conversation: each round reads the previous round's prefix from the cache and
+// writes its own for the next one. Streaming is the loop's path; a one-shot
+// Complete has no next round to read it, and would pay the cache write for
+// nothing.
+func markCacheTail(msgs []anthropic.MessageParam) {
+	if len(msgs) == 0 {
+		return
+	}
+	blocks := msgs[len(msgs)-1].Content
+	if len(blocks) == 0 {
+		return
+	}
+	if cc := blocks[len(blocks)-1].GetCacheControl(); cc != nil {
+		*cc = anthropic.NewCacheControlEphemeralParam()
+	}
 }
 
 func (p *anthropicProvider) generate(ctx context.Context, req Request) (string, []ToolCall, error) {
@@ -59,6 +94,9 @@ func (p *anthropicProvider) generate(ctx context.Context, req Request) (string, 
 	resp, err := client.Messages.New(ctx, p.buildParams(req))
 	if err != nil {
 		return "", nil, err
+	}
+	if resp.StopReason == anthropic.StopReasonRefusal {
+		return "", nil, errAnthropicRefusal
 	}
 
 	var text strings.Builder
@@ -110,6 +148,10 @@ func (p *anthropicProvider) buildMessages(in []Message) ([]anthropic.TextBlockPa
 			systemBlocks = append(systemBlocks, anthropic.TextBlockParam{Text: m.Content})
 		case RoleAssistant:
 			flush()
+			if turn, ok := m.Native.(anthropicTurn); ok && len(turn.content) > 0 {
+				msgs = append(msgs, anthropic.NewAssistantMessage(turn.content...))
+				continue
+			}
 			var blocks []anthropic.ContentBlockParamUnion
 			if m.Content != "" {
 				blocks = append(blocks, anthropic.NewTextBlock(m.Content))
@@ -121,7 +163,7 @@ func (p *anthropicProvider) buildMessages(in []Message) ([]anthropic.TextBlockPa
 				msgs = append(msgs, anthropic.NewAssistantMessage(blocks...))
 			}
 		case RoleTool:
-			pendingTools = append(pendingTools, anthropic.NewToolResultBlock(m.ToolCallID, m.Content, false))
+			pendingTools = append(pendingTools, anthropic.NewToolResultBlock(m.ToolCallID, m.Content, m.IsError))
 		default:
 			flush()
 			msgs = append(msgs, anthropic.NewUserMessage(userBlocks(m)...))
@@ -197,8 +239,10 @@ func (p *anthropicProvider) Stream(ctx context.Context, req Request) (<-chan Eve
 func (p *anthropicProvider) stream(ctx context.Context, req Request, ch chan<- Event) {
 	defer close(ch)
 
+	params := p.buildParams(req)
+	markCacheTail(params.Messages)
 	client := p.newClient()
-	stream := client.Messages.NewStreaming(ctx, p.buildParams(req))
+	stream := client.Messages.NewStreaming(ctx, params)
 
 	var acc anthropic.Message
 	for stream.Next() {
@@ -209,8 +253,13 @@ func (p *anthropicProvider) stream(ctx context.Context, req Request, ch chan<- E
 		}
 
 		if delta, ok := event.AsAny().(anthropic.ContentBlockDeltaEvent); ok {
-			if td, ok := delta.Delta.AsAny().(anthropic.TextDelta); ok && td.Text != "" {
-				if !send(ctx, ch, Event{Kind: EventTextDelta, Text: td.Text}) {
+			switch d := delta.Delta.AsAny().(type) {
+			case anthropic.TextDelta:
+				if d.Text != "" && !send(ctx, ch, Event{Kind: EventTextDelta, Text: d.Text}) {
+					return
+				}
+			case anthropic.ThinkingDelta:
+				if d.Thinking != "" && !send(ctx, ch, Event{Kind: EventReasoningDelta, Text: d.Thinking}) {
 					return
 				}
 			}
@@ -221,10 +270,30 @@ func (p *anthropicProvider) stream(ctx context.Context, req Request, ch chan<- E
 		send(ctx, ch, Event{Kind: EventError, Err: err})
 		return
 	}
+	if acc.StopReason == anthropic.StopReasonRefusal {
+		send(ctx, ch, Event{Kind: EventError, Err: errAnthropicRefusal})
+		return
+	}
 	for _, tc := range toolCallsFromContent(acc.Content) {
 		if !send(ctx, ch, Event{Kind: EventToolCall, ToolCall: tc}) {
 			return
 		}
 	}
-	send(ctx, ch, Event{Kind: EventDone})
+	send(ctx, ch, Event{
+		Kind:      EventDone,
+		Native:    anthropicTurn{content: acc.ToParam().Content},
+		Truncated: acc.StopReason == anthropic.StopReasonMaxTokens || acc.StopReason == anthropic.StopReasonModelContextWindowExceeded,
+		Usage:     anthropicUsage(acc.Usage),
+	})
+}
+
+// anthropicUsage totals the input the way the other protocols report it.
+// Anthropic splits it three ways, and input_tokens alone is only the part
+// after the last cache breakpoint.
+func anthropicUsage(u anthropic.Usage) Usage {
+	return Usage{
+		InputTokens:  int(u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens),
+		CachedTokens: int(u.CacheReadInputTokens),
+		OutputTokens: int(u.OutputTokens),
+	}
 }

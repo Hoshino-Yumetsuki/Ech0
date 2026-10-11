@@ -26,12 +26,24 @@ func (p *openaiProvider) client() *openai.Client {
 	return openai.NewClientWithConfig(cfg)
 }
 
+// openaiTurn is what a Chat Completions assistant turn has to carry into the
+// next request: the reasoning_content a thinking model streamed alongside its
+// tool calls. DeepSeek's thinking mode rejects a tool-call continuation without
+// it ("The reasoning_content in the thinking mode must be passed back"); servers
+// that never send the field never get it back.
+type openaiTurn struct {
+	reasoning string
+}
+
 func (p *openaiProvider) buildMessages(in []Message) []openai.ChatCompletionMessage {
 	msgs := make([]openai.ChatCompletionMessage, 0, len(in))
 	for _, m := range in {
 		msg := openai.ChatCompletionMessage{
 			Role:       toOpenAIRole(m.Role),
 			ToolCallID: m.ToolCallID,
+		}
+		if turn, ok := m.Native.(openaiTurn); ok && m.Role == RoleAssistant {
+			msg.ReasoningContent = turn.reasoning
 		}
 		if len(m.Images) > 0 {
 			msg.MultiContent = openAIImageParts(m.Content, m.Images)
@@ -92,20 +104,27 @@ func (p *openaiProvider) buildTools(defs []ToolDef) []openai.Tool {
 	return tools
 }
 
-func (p *openaiProvider) Complete(ctx context.Context, req Request) (Response, error) {
+// buildRequest is the one place a portable Request becomes a Chat Completions
+// request, shared by Complete and Stream. Sampling is sent only when the
+// operator configured it; no output ceiling is sent at all, which is the one
+// choice every compatible server and every model accepts.
+func (p *openaiProvider) buildRequest(req Request) openai.ChatCompletionRequest {
 	chatReq := openai.ChatCompletionRequest{
 		Model:    p.setting.Model,
 		Messages: p.buildMessages(req.Messages),
 		Tools:    p.buildTools(req.Tools),
 	}
-	if req.Temperature != nil {
-		chatReq.Temperature = *req.Temperature
+	if len(chatReq.Tools) > 0 && req.ToolChoice == ToolChoiceNone {
+		chatReq.ToolChoice = "none"
 	}
-	if req.MaxTokens > 0 {
-		chatReq.MaxTokens = req.MaxTokens
+	if t := p.setting.Temperature; t != nil {
+		chatReq.Temperature = float32(*t)
 	}
+	return chatReq
+}
 
-	resp, err := p.client().CreateChatCompletion(ctx, chatReq)
+func (p *openaiProvider) Complete(ctx context.Context, req Request) (Response, error) {
+	resp, err := p.client().CreateChatCompletion(ctx, p.buildRequest(req))
 	if err != nil {
 		return Response{}, err
 	}
@@ -124,18 +143,11 @@ func (p *openaiProvider) Stream(ctx context.Context, req Request) (<-chan Event,
 func (p *openaiProvider) stream(ctx context.Context, req Request, ch chan<- Event) {
 	defer close(ch)
 
-	chatReq := openai.ChatCompletionRequest{
-		Model:    p.setting.Model,
-		Messages: p.buildMessages(req.Messages),
-		Tools:    p.buildTools(req.Tools),
-		Stream:   true,
-	}
-	if req.Temperature != nil {
-		chatReq.Temperature = *req.Temperature
-	}
-	if req.MaxTokens > 0 {
-		chatReq.MaxTokens = req.MaxTokens
-	}
+	chatReq := p.buildRequest(req)
+	chatReq.Stream = true
+	// Without it a stream reports no usage at all; with it, the last chunk
+	// carries the request's token counts and no choices.
+	chatReq.StreamOptions = &openai.StreamOptions{IncludeUsage: true}
 
 	stream, err := p.client().CreateChatCompletionStream(ctx, chatReq)
 	if err != nil {
@@ -147,6 +159,11 @@ func (p *openaiProvider) stream(ctx context.Context, req Request, ch chan<- Even
 	acc := newToolCallAccumulator()
 	guard := &toolCallLeakGuard{}
 	splitter := &reasoningSplitter{}
+	var (
+		reasoning strings.Builder
+		finish    openai.FinishReason
+		usage     Usage
+	)
 
 	for {
 		resp, recvErr := stream.Recv()
@@ -157,12 +174,19 @@ func (p *openaiProvider) stream(ctx context.Context, req Request, ch chan<- Even
 			send(ctx, ch, Event{Kind: EventError, Err: recvErr})
 			return
 		}
+		if resp.Usage != nil {
+			usage = chatUsage(resp.Usage)
+		}
 		if len(resp.Choices) == 0 {
 			continue
+		}
+		if fr := resp.Choices[0].FinishReason; fr != "" {
+			finish = fr
 		}
 		delta := resp.Choices[0].Delta
 
 		if delta.ReasoningContent != "" {
+			reasoning.WriteString(delta.ReasoningContent)
 			if !send(ctx, ch, Event{Kind: EventReasoningDelta, Text: delta.ReasoningContent}) {
 				return
 			}
@@ -184,6 +208,11 @@ func (p *openaiProvider) stream(ctx context.Context, req Request, ch chan<- Even
 			}
 		}
 		acc.add(delta.ToolCalls)
+	}
+
+	if finish == openai.FinishReasonContentFilter {
+		send(ctx, ch, Event{Kind: EventError, Err: errContentFiltered})
+		return
 	}
 
 	ansRest, reaRest := splitter.flush()
@@ -210,7 +239,11 @@ func (p *openaiProvider) stream(ctx context.Context, req Request, ch chan<- Even
 			return
 		}
 	}
-	send(ctx, ch, Event{Kind: EventDone})
+	done := Event{Kind: EventDone, Truncated: finish == openai.FinishReasonLength, Usage: usage}
+	if reasoning.Len() > 0 {
+		done.Native = openaiTurn{reasoning: reasoning.String()}
+	}
+	send(ctx, ch, done)
 }
 
 type toolCallAccumulator struct {
@@ -228,10 +261,7 @@ func newToolCallAccumulator() *toolCallAccumulator {
 
 func (a *toolCallAccumulator) add(deltas []openai.ToolCall) {
 	for _, d := range deltas {
-		idx := 0
-		if d.Index != nil {
-			idx = *d.Index
-		}
+		idx := a.slotFor(d)
 		tc, ok := a.byIdx[idx]
 		if !ok {
 			tc = &ToolCall{}
@@ -248,6 +278,28 @@ func (a *toolCallAccumulator) add(deltas []openai.ToolCall) {
 			a.args[idx] = append(a.args[idx], d.Function.Arguments...)
 		}
 	}
+}
+
+// slotFor places a fragment. The index is the protocol's answer, but some
+// compatible servers (older Ollama, several Gemini bridges) omit it; there a
+// fragment with an id nobody has used yet starts a new call, and anything else
+// continues the call in progress. Folding every index-less fragment into slot
+// zero merges parallel calls into one name and one invalid JSON argument.
+func (a *toolCallAccumulator) slotFor(d openai.ToolCall) int {
+	if d.Index != nil {
+		return *d.Index
+	}
+	if n := len(a.order); n > 0 {
+		last := a.order[n-1]
+		if d.ID == "" || a.byIdx[last].ID == "" || a.byIdx[last].ID == d.ID {
+			return last
+		}
+	}
+	next := 0
+	for _, idx := range a.order {
+		next = max(next, idx+1)
+	}
+	return next
 }
 
 func (a *toolCallAccumulator) finish() []ToolCall {
@@ -326,4 +378,14 @@ func markerPrefixHold(s string) int {
 		}
 	}
 	return hold
+}
+
+// chatUsage reads Chat Completions usage, where prompt_tokens already includes
+// the cached part.
+func chatUsage(u *openai.Usage) Usage {
+	out := Usage{InputTokens: u.PromptTokens, OutputTokens: u.CompletionTokens}
+	if u.PromptTokensDetails != nil {
+		out.CachedTokens = u.PromptTokensDetails.CachedTokens
+	}
+	return out
 }

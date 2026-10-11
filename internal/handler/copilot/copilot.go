@@ -7,6 +7,7 @@ import (
 	"context"
 
 	"github.com/gin-gonic/gin"
+	res "github.com/lin-snow/ech0/internal/handler/response"
 	i18n "github.com/lin-snow/ech0/internal/i18n"
 	commonModel "github.com/lin-snow/ech0/internal/model/common"
 	copilotService "github.com/lin-snow/ech0/internal/service/copilot"
@@ -93,6 +94,9 @@ func (h *CopilotHandler) Ask() gin.HandlerFunc {
 		_ = ctx.ShouldBindJSON(&req)
 		locale := i18n.LocaleFromGin(ctx)
 		timezone := timezoneUtil.NormalizeTimezone(ctx.GetHeader(timezoneUtil.DefaultTimezoneHeader))
-		_ = h.chatService.AskStream(ctx.Request.Context(), req.Question, locale, timezone, ctx.Writer)
+		err := h.chatService.AskStream(ctx.Request.Context(), req.Question, locale, timezone, ctx.Writer)
+		if err != nil && !ctx.Writer.Written() {
+			res.Execute(func(*gin.Context) res.Response { return res.Response{Err: err} })(ctx)
+		}
 	}
 }
