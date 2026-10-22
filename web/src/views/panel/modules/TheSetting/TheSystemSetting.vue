@@ -13,6 +13,7 @@
             :apply-title="t('commonUi.apply')"
             :cancel-title="t('commonUi.cancel')"
             :edit-title="t('commonUi.edit')"
+            :busy="saving"
             @apply="handleUpdateSystemSetting"
             @toggle="editMode = !editMode"
           />
@@ -293,6 +294,7 @@ const { getSystemSetting } = settingStore
 const { SystemSetting } = storeToRefs(settingStore)
 
 const editMode = ref<boolean>(false)
+const saving = ref<boolean>(false)
 const systemLogoSrc = computed(() => resolveAvatarUrl(SystemSetting.value?.server_logo))
 const localeOptions = LOCALE_OPTIONS
 const defaultLocaleLabel = computed(
@@ -311,6 +313,8 @@ const homeLayoutOptions = computed(() => [
 const { enqueueUpload, waitForTask, clearFinishedUploads } = useFileQueue()
 
 const handleUpdateSystemSetting = async () => {
+  if (saving.value) return
+  saving.value = true
   await fetchUpdateSettings(settingStore.SystemSetting)
     .then((res) => {
       if (res.code === 1) {
@@ -318,6 +322,7 @@ const handleUpdateSystemSetting = async () => {
       }
     })
     .finally(() => {
+      saving.value = false
       editMode.value = false
       getSystemSetting()
     })
