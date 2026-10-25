@@ -174,3 +174,24 @@ func TestParseOAuthState_BadSignature(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, parsed)
 }
+
+func TestRenewRefreshClaims_KeepsSessionIdentity(t *testing.T) {
+	user := userModel.User{ID: "u-renew", Username: "renew"}
+
+	originalAny := CreateRefreshClaims(user)
+	original, ok := originalAny.(authModel.MyClaims)
+	require.True(t, ok, "unexpected claims type %T", originalAny)
+
+	renewedAny := RenewRefreshClaims(user, original.ID)
+	renewed, ok := renewedAny.(authModel.MyClaims)
+	require.True(t, ok, "unexpected claims type %T", renewedAny)
+
+	assert.Equal(t, original.ID, renewed.ID, "renewal must keep JTI so revocation targets the same session")
+	assert.Equal(t, authModel.TokenTypeRefresh, renewed.Type)
+	assert.Equal(t, user.ID, renewed.Userid)
+	require.NotNil(t, renewed.ExpiresAt)
+	assert.False(t, renewed.ExpiresAt.Time.Before(original.ExpiresAt.Time), "renewal must not shorten expiry")
+
+	blank := RenewRefreshClaims(user, "").(authModel.MyClaims)
+	assert.NotEmpty(t, blank.ID, "missing JTI must be regenerated")
+}

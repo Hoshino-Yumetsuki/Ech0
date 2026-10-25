@@ -41,9 +41,22 @@ func CreateClaims(user userModel.User) jwt.Claims {
 }
 
 func CreateRefreshClaims(user userModel.User) jwt.Claims {
+	return buildRefreshClaims(user, cryptoUtil.GenerateRandomString(16))
+}
+
+// RenewRefreshClaims re-issues refresh claims for an existing session, keeping its
+// JTI so revocation still targets the same session, while sliding ExpiresAt forward.
+func RenewRefreshClaims(user userModel.User, jti string) jwt.Claims {
+	if jti == "" {
+		jti = cryptoUtil.GenerateRandomString(16)
+	}
+	return buildRefreshClaims(user, jti)
+}
+
+func buildRefreshClaims(user userModel.User, jti string) authModel.MyClaims {
 	leeway := time.Second * 60
 	now := time.Now().UTC()
-	claims := authModel.MyClaims{
+	return authModel.MyClaims{
 		Userid:   user.ID,
 		Username: user.Username,
 		Type:     authModel.TokenTypeRefresh,
@@ -55,10 +68,8 @@ func CreateRefreshClaims(user userModel.User) jwt.Claims {
 		),
 		IssuedAt:  jwt.NewNumericDate(now),
 		NotBefore: jwt.NewNumericDate(now.Add(-leeway)),
-		ID:        cryptoUtil.GenerateRandomString(16),
+		ID:        jti,
 	}
-
-	return claims
 }
 
 func CreateClaimsWithExpiry(user userModel.User, expiry int64) jwt.Claims {

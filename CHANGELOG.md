@@ -9,6 +9,10 @@ For releases prior to v4.6.5, see the [GitHub releases page](https://github.com/
 
 ## [Unreleased]
 
+### Fixed
+
+* **登录不再每周失效。** Refresh token 之前是登录时刻起算的固定 7 天，而 `/api/auth/refresh` 只签发 access token、从不续期 refresh cookie，所以无论多活跃，一周后都必须重新登录。现在每次静默刷新都会重签发 refresh token 并重置 Cookie（`exp` 滑到 `now + ECH0_JWT_REFRESH_EXPIRES`），只要 7 天内活跃过就不会掉登录；续期沿用原 JTI，登出吊销仍作用于同一会话，多标签页并发刷新也不会互相挤下线。
+
 
 ## [5.8.2] - 2026-10-22
 
