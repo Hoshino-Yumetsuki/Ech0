@@ -6,7 +6,7 @@ This package is built with Vite, type-checked with `vue-tsc`, and its production
 that exposes the REST API.
 
 > For repo-wide architecture (Wire DI, event bus, storage abstraction, contributing rules) see the root
-> [`CLAUDE.md`](../CLAUDE.md) and [`CONTRIBUTING.md`](../CONTRIBUTING.md).
+> [`AGENTS.md`](../AGENTS.md) and [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 > This README focuses on what lives under [`web/`](.) and how to develop against it.
 
 ---

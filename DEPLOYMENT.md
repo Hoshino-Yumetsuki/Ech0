@@ -7,6 +7,7 @@ For a 60-second quickstart, see the [main README](./README.md#try-in-60-seconds)
 ## Table of contents
 
 - [Quick Deployment](#quick-deployment)
+  - [Environment Variables](#environment-variables)
   - [Docker (Recommended)](#docker-recommended)
   - [Docker Compose](#docker-compose)
   - [Script Deployment](#script-deployment)
@@ -19,6 +20,16 @@ For a 60-second quickstart, see the [main README](./README.md#try-in-60-seconds)
 ---
 
 ## Quick Deployment
+
+### Environment Variables
+
+All variables, defaults, precedence rules, and the boundary between bootstrap env and admin-panel settings are documented in
+[`docs/usage/configuration.md`](./docs/usage/configuration.md). The essentials:
+
+- **Precedence:** process env → `./.env` (working directory only, no `--env-file` flag) → built-in defaults. Changes need a restart.
+- **`JWT_SECRET` has no `ECH0_` prefix** (`ECH0_JWT_SECRET` is accepted as an alias). If unset, an ephemeral secret is generated and **every restart invalidates all issued tokens**.
+- `ECH0_SERVER_HOST` / `ECH0_SERVER_PORT` control the bind address (default all interfaces, port `6277`); `ECH0_DB_PATH` accepts any SQLite file path.
+- `ECH0_SETTING_*`, `ECH0_S3_*`, Passkey and OAuth2 redirect env vars are only **first-boot defaults** seeded into the database — once the instance is initialized, change them in the admin panel.
 
 ### 🐳 Docker (Recommended)
 
@@ -52,6 +63,14 @@ curl -fsSL "https://raw.githubusercontent.com/lin-snow/Ech0/main/scripts/ech0.sh
 
 > The script installs and manages Ech0 through systemd, so please run with root privileges when needed.
 > You can run `bash ech0.sh install /your/path/ech0` to customize the install path.
+>
+> Already running an older `em` manager script? Refresh it once (installs the current script to `/usr/local/sbin/em`):
+>
+> ```shell
+> curl -fsSL "https://raw.githubusercontent.com/lin-snow/Ech0/main/scripts/ech0.sh" | sudo bash -s -- self-update
+> ```
+>
+> Afterwards `em update` keeps both the server binary and the manager script up to date.
 
 ### ☸️ Kubernetes (Helm)
 

@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to AGENT when working with code in this repository.
 
 ## Project overview
 
@@ -96,7 +96,7 @@ Two function-calling integrations that point opposite ways:
 
 ### Configuration
 
-`internal/config/config.go` is the single config source; env vars are parsed via `caarlos0/env`. See `.env.example` for the full set (JWT secret, server port, DB path, log, S3, event runtime, etc.). Defaults target `./data/` for SQLite + uploaded files; Docker images mount `/app/data`.
+`internal/config/config.go` is the single config source; env vars are parsed via `caarlos0/env` on top of `./.env` (godotenv, process env wins). See `docs/usage/configuration.md` for the full variable reference (JWT secret, server port, DB path, log, S3, event runtime, etc.). Defaults target `./data/` for SQLite + uploaded files; Docker images mount `/app/data`.
 
 ## Conventions to respect
 

@@ -14,8 +14,8 @@ func TestDefaultLogConfig(t *testing.T) {
 	if cfg.Format != "json" {
 		t.Errorf("Format = %q, want %q", cfg.Format, "json")
 	}
-	if cfg.Console {
-		t.Errorf("Console = %v, want false", cfg.Console)
+	if !cfg.Console {
+		t.Errorf("Console = %v, want true", cfg.Console)
 	}
 
 	wantFile := FileConfig{

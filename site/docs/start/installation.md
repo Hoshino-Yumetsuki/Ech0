@@ -93,6 +93,13 @@ curl -fsSL "https://raw.githubusercontent.com/lin-snow/Ech0/main/scripts/ech0.sh
 
 - 脚本通过 **systemd** 安装和管理服务，涉及服务启停时通常需要 **root**。
 - 自定义安装目录可执行：`bash ech0.sh install /your/path/ech0`（以脚本 `--help` 为准）。
+- 已在用旧版管理脚本（`em`）的机器，先执行一次引导命令把脚本换成当前版本（写入 `/usr/local/sbin/em`）：
+
+  ```bash
+  curl -fsSL "https://raw.githubusercontent.com/lin-snow/Ech0/main/scripts/ech0.sh" | sudo bash -s -- self-update
+  ```
+
+  之后 `em update` 会同时刷新服务端二进制与管理脚本；也可随时 `em self-update` 单独更新脚本。
 
 ---
 

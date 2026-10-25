@@ -4,6 +4,7 @@
 package database
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -139,4 +140,34 @@ func TestMigrateDB_AccessTokenSettingIncludesScopeFields(t *testing.T) {
 	if got.LastUsedAt == nil {
 		t.Fatal("expected last_used_at to be set")
 	}
+}
+
+func TestEnsureDBDir_CustomDBPath(t *testing.T) {
+	t.Run("bare filename needs no directory", func(t *testing.T) {
+		if err := ensureDBDir("ech0.db"); err != nil {
+			t.Fatalf("ensureDBDir(ech0.db) = %v, want nil", err)
+		}
+	})
+
+	t.Run("creates parent of arbitrary filename", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "nested", "data")
+		dbPath := filepath.Join(dir, "custom.sqlite")
+
+		if err := ensureDBDir(dbPath); err != nil {
+			t.Fatalf("ensureDBDir(%q) = %v, want nil", dbPath, err)
+		}
+		info, err := os.Stat(dir)
+		if err != nil {
+			t.Fatalf("parent dir not created: %v", err)
+		}
+		if !info.IsDir() {
+			t.Fatalf("expected %q to be a directory", dir)
+		}
+	})
+
+	t.Run("rejects empty path", func(t *testing.T) {
+		if err := ensureDBDir("  "); err == nil {
+			t.Fatal("expected error for empty ECH0_DB_PATH")
+		}
+	})
 }

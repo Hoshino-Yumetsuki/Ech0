@@ -1,6 +1,6 @@
 # Development Guide
 
-This guide covers local development for **Ech0** — environment setup, hot reload, and front-/back-end integration. For higher-level architecture see [`CLAUDE.md`](../../CLAUDE.md) and [`CONTRIBUTING.md`](../../CONTRIBUTING.md).
+This guide covers local development for **Ech0** — environment setup, hot reload, and front-/back-end integration. For higher-level architecture see [`AGENTS.md`](../../AGENTS.md) and [`CONTRIBUTING.md`](../../CONTRIBUTING.md).
 
 ## Backend Requirements
 
@@ -27,20 +27,23 @@ Install [Golangci-Lint](https://golangci-lint.run/) for linting and formatting:
 - Recommended via justfile: `just air-install`
 - Or install manually: `go install github.com/air-verse/air@latest`
 
-📌 **Swagger**
-Install [Swagger](https://github.com/swaggo/gin-swagger) to generate/use OpenAPI docs:
-- Run `swag init -g internal/server/server.go -o internal/swagger` in project root to generate or update Swagger docs
-- Visit `http://localhost:6277/swagger/index.html` in your browser to view and use docs
+📌 **OpenAPI**
+The spec is generated from Huma handler types — there is no `swag` step:
+- Run `just openapi` to regenerate `internal/openapi/openapi.yaml`; `just openapi-check` fails on drift.
+- Serve docs at `http://localhost:6277/api/docs`, raw spec at `/api/openapi.json|.yaml`.
+
+📌 **Environment / `.env`**
+All variables, defaults and the env-vs-admin-settings boundary are documented in [usage/configuration.md](../usage/configuration.md).
 
 📌 **Event Runtime Parameters (Busen)**
-- `ECH0_EVENT_DEFAULT_BUFFER` / `ECH0_EVENT_DEFAULT_OVERFLOW`
-- `ECH0_EVENT_SYSTEM_BUFFER`
-- `ECH0_EVENT_AGENT_BUFFER` / `ECH0_EVENT_AGENT_PARALLELISM`
-- `ECH0_EVENT_WEBHOOK_POOL_WORKERS` / `ECH0_EVENT_WEBHOOK_POOL_QUEUE`
+- `ECH0_EVENT_DEFAULT_BUFFER` (default `512`) / `ECH0_EVENT_DEFAULT_OVERFLOW` (`block`, the default; `fail_fast` / `drop_newest` / `drop_oldest`)
+- `ECH0_EVENT_SYSTEM_BUFFER` (default `64`)
+- `ECH0_EVENT_AGENT_BUFFER` (default `128`) / `ECH0_EVENT_AGENT_PARALLELISM` (default `2`)
+- `ECH0_EVENT_WEBHOOK_POOL_WORKERS` / `ECH0_EVENT_WEBHOOK_POOL_QUEUE` (default `6` / `6`)
 
 📌 **Agent (Copilot) Parameters**
-- `ECH0_AGENT_TIMEOUT_SECONDS` — generation budget (seconds) for one Copilot chat run: model streaming plus non-interactive tools; default `120`, `<=0` disables it. Time spent waiting on a person is credited back rather than charged here.
-- `ECH0_AGENT_MAX_ROUNDS` — how many tool-calling rounds one run may take before it must answer; default `4`.
+- `ECH0_AGENT_TIMEOUT_SECONDS` — generation budget (seconds) for one Copilot chat run: model streaming plus non-interactive tools; default `300`, `<=0` disables it. Time spent waiting on a person is credited back rather than charged here.
+- `ECH0_AGENT_MAX_ROUNDS` — how many tool-calling rounds one run may take before it must answer; default `20`.
 - `ECH0_AGENT_ASK_TIMEOUT_SECONDS` — how long a run parks waiting for you to answer a question or confirm a write (`ask_user`, `create_echo`, `update_echo`, `delete_echo`); default `300`. A round that expires performs nothing.
 
 📌 **OpenAPI Docs Panel**

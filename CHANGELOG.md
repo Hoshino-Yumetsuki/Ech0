@@ -9,6 +9,42 @@ For releases prior to v4.6.5, see the [GitHub releases page](https://github.com/
 
 ## [Unreleased]
 
+## [5.8.3] - 2026-10-25
+
+### Added
+
+* **The `em` manager script updates itself.** `em self-update` (menu option 10) replaces `/usr/local/sbin/em` with the current script and refreshes the `em` / `ech0` links, and `em update` now does the same on every run, even when the server binary is already current. Installs that still run the old script need one bootstrap: `curl -fsSL https://raw.githubusercontent.com/lin-snow/Ech0/main/scripts/ech0.sh | sudo bash -s -- self-update`.
+
+* **`em logs`, `em help`, and `em update --force`.** Logs are one command away instead of a raw `journalctl` invocation, `help` lists every action, and `--force` reinstalls the current release when a normal update skips it.
+
+* **Script installs get a persistent `JWT_SECRET`.** When `.env` does not already define one, the installer generates it, so restarting the service no longer invalidates every signed-in session.
+
+* **Install and update verify the service actually started.** Both wait for the unit to become active and probe `/healthz`, and print the last journal lines when startup fails.
+
+### Fixed
+
+* **`curl … | bash` no longer installs the shell as the manager.** The installer copied `/bin/bash` to `/usr/local/sbin/em` when it could not find its own script file; it now downloads the real script instead.
+
+* **Only stable Ech0 releases are selected.** Version lookup uses the latest-release endpoint and ignores pre-releases and chart tags such as `ech0-5.8.2`.
+
+* **A failed update rolls back.** The previous binary is kept as `ech0.bak` and restored automatically if the new one does not start.
+
+* **The manager's "current information" menu item works again.** It called the removed `ech0 info` command; it now runs `ech0 version`.
+
+* **Uninstall keeps configuration together with the data.** Keeping `data/` now also keeps `.env`, and the "already installed" message points at `update` / `self-update` instead of a dead end.
+
+* **The systemd unit waits for the network and stops cleanly.** It starts after `network-online.target` and allows 30 seconds for shutdown.
+
+* **A custom `ECH0_DB_PATH` no longer crashes or creates the wrong directory.** Directory resolution hardcoded an `/ech0.db` suffix: a bare file name such as `ech0.db` panicked, and `data/mydb.sqlite` resolved its parent to `data/my`. The directory now comes from the path itself, so any file name or nesting works, and an `ECH0_DB_TYPE` other than `sqlite` fails at startup with a clear error instead of running on an empty DB handle.
+
+* **`ECH0_SERVER_HOST` and `ECH0_LOG_CONSOLE` now take effect.** The listener was pinned to all interfaces and console output could not be turned off. `ECH0_SERVER_HOST=127.0.0.1` now narrows the bind address (empty / `0.0.0.0` / `::` still keeps dual-stack), and `ECH0_LOG_CONSOLE=false` writes only to the log file and TUI log stream (the default stays `true`, so existing behavior is unchanged).
+
+* **Clearer errors for `.env` and JWT secrets.** A `.env` file that exists but fails to parse now reports the real error instead of "No .env file found"; an unset `JWT_SECRET` warns that restarting invalidates issued tokens and adds an `ECH0_JWT_SECRET` alias; a malformed numeric env value names the affected field and keeps its default.
+
+* **Dead env vars removed.** `ECH0_MIGRATION_*`, `ECH0_COMMENT_ENABLE` (comments are toggled in the admin panel), and `ECH0_UPLOAD_{IMAGE,AUDIO,VIDEO}_PATH` (storage paths are chosen by extension routing) had no effect when set. See the new [`docs/usage/configuration.md`](docs/usage/configuration.md) for the full variable and default list.
+
+* **Sessions no longer expire every week.** The refresh token used a fixed 7 days from sign-in, and `/api/auth/refresh` only issued access tokens and never renewed the refresh cookie, so even an active user had to sign in again after a week. Every silent refresh now reissues the refresh token and resets the cookie (`exp` slides to `now + ECH0_JWT_REFRESH_EXPIRES`), so staying active within 7 days keeps you signed in. Renewal keeps the original JTI, so logout still revokes the same session and concurrent refreshes from multiple tabs no longer sign each other out.
+
 
 ## [5.8.2] - 2026-10-22
 
@@ -806,7 +842,8 @@ This is primarily a security release: six advisories disclosed since v4.7.2 are 
 
   Practical risk in this repo was negligible (the vulnerable code only runs at PWA build time on developer-controlled input), but the alerts are now resolved at the supply-chain level.
 
-[Unreleased]: https://github.com/lin-snow/Ech0/compare/v5.5.0...HEAD
+[Unreleased]: https://github.com/lin-snow/Ech0/compare/v5.8.3...HEAD
+[5.8.3]: https://github.com/lin-snow/Ech0/compare/v5.8.2...v5.8.3
 [5.5.0]: https://github.com/lin-snow/Ech0/compare/v5.4.7...v5.5.0
 [5.4.7]: https://github.com/lin-snow/Ech0/compare/v5.4.6...v5.4.7
 [5.4.6]: https://github.com/lin-snow/Ech0/compare/v5.4.5...v5.4.6

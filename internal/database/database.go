@@ -6,7 +6,10 @@ package database
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -71,6 +74,20 @@ func openSQLite(dbPath string, logLevel logger.LogLevel) (*gorm.DB, error) {
 	return gorm.Open(sqlite.Open(dbPath+"?"+sqliteConnParams), buildGormConfig(logLevel))
 }
 
+// ensureDBDir creates the parent directory of the configured SQLite file.
+// ECH0_DB_PATH is an arbitrary path — not necessarily data/ech0.db — so the
+// directory must come from the path itself rather than a hardcoded suffix.
+func ensureDBDir(dbPath string) error {
+	if strings.TrimSpace(dbPath) == "" {
+		return errors.New("ECH0_DB_PATH is empty")
+	}
+	dir := filepath.Dir(dbPath)
+	if dir == "." || dir == string(filepath.Separator) {
+		return nil
+	}
+	return os.MkdirAll(dir, 0o755)
+}
+
 func configLogLevel() logger.LogLevel {
 	if config.Config().Database.LogMode == "release" {
 		return logger.Silent
@@ -86,25 +103,29 @@ func InitDatabase() {
 	dbType := config.Config().Database.Type
 	dbPath := config.Config().Database.Path
 
-	dir := dbPath[:len(dbPath)-len("/ech0.db")]
-	if err := os.MkdirAll(dir, os.ModePerm); err != nil {
+	if dbType != "sqlite" {
+		util.HandlePanicError(&commonModel.ServerError{
+			Msg: commonModel.INIT_DATABASE_PANIC,
+			Err: errors.New("unsupported ECH0_DB_TYPE " + strconv.Quote(dbType) + ` (only "sqlite" is supported)`),
+		})
+	}
+
+	if err := ensureDBDir(dbPath); err != nil {
 		util.HandlePanicError(&commonModel.ServerError{
 			Msg: commonModel.CREATE_DB_PATH_PANIC,
 			Err: err,
 		})
 	}
 
-	if dbType == "sqlite" {
-		sqlite_vec.Auto()
-		SQLiteDB, err := openSQLite(dbPath, configLogLevel())
-		if err != nil {
-			util.HandlePanicError(&commonModel.ServerError{
-				Msg: commonModel.INIT_DATABASE_PANIC,
-				Err: err,
-			})
-		}
-		SetDB(SQLiteDB)
+	sqlite_vec.Auto()
+	SQLiteDB, err := openSQLite(dbPath, configLogLevel())
+	if err != nil {
+		util.HandlePanicError(&commonModel.ServerError{
+			Msg: commonModel.INIT_DATABASE_PANIC,
+			Err: err,
+		})
 	}
+	SetDB(SQLiteDB)
 
 	if err := MigrateDB(); err != nil {
 		util.HandlePanicError(&commonModel.ServerError{

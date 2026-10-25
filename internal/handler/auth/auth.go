@@ -104,6 +104,21 @@ func (h *AuthHandler) Refresh() gin.HandlerFunc {
 			return
 		}
 
+		renewedRefreshToken, err := jwtUtil.GenerateToken(jwtUtil.RenewRefreshClaims(user, claims.ID))
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, commonModel.FailWithLocalized[any](
+				i18nUtil.Localize(localizer, commonModel.MsgKeyAuthTokenGenerateFailed, errUtil.HandleError(&commonModel.ServerError{
+					Msg: commonModel.TOKEN_GENERATE_FAILED, Err: err,
+				}), nil),
+				commonModel.ErrCodeTokenGenerateFailed,
+				commonModel.MsgKeyAuthTokenGenerateFailed,
+				nil,
+			))
+			return
+		}
+
+		cookieUtil.SetRefreshTokenCookie(ctx, renewedRefreshToken, config.Config().Auth.Jwt.RefreshExpires)
+
 		ctx.JSON(http.StatusOK, commonModel.OK(authModel.TokenPair{
 			AccessToken: accessToken,
 			ExpiresIn:   config.Config().Auth.Jwt.Expires,

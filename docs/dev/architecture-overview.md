@@ -2,7 +2,7 @@
 
 > 本文是交付给新接手者的**架构全景**：从一个进程如何启动讲起，逐层展开后端分层、业务领域、两大能力层（Agent / MCP）、事件驱动子系统、基础设施组件、`pkg/` 自研库，最后到前端与端到端数据流。读完应能回答："某个功能从请求进来到落库/落盘，经过了哪些模块、谁依赖谁。"
 >
-> 配套细节文档：DI 约定见 `CLAUDE.md`；Agent/Chat 见 `docs/dev/llm-chat-design.md`、`docs/dev/agent-toolcall-design.md`；MCP 接入见 `docs/usage/mcp-usage.md`；事件系统见本文 §9 + `CLAUDE.md`「Event bus (Busen)」；存储见 `docs/usage/storage-migration.md`；鉴权见 `docs/dev/auth-design.md`、`docs/dev/access-token-scope-design.md`；Job/Task 见 `docs/dev/job-runner-design.md`、`docs/dev/snapshot-design.md`。
+> 配套细节文档：DI 约定见 `AGENTS.md`；Agent/Chat 见 `docs/dev/llm-chat-design.md`、`docs/dev/agent-toolcall-design.md`；MCP 接入见 `docs/usage/mcp-usage.md`；事件系统见本文 §9 + `AGENTS.md`「Event bus (Busen)」；存储见 `docs/usage/storage-migration.md`；鉴权见 `docs/dev/auth-design.md`、`docs/dev/access-token-scope-design.md`；Job/Task 见 `docs/dev/job-runner-design.md`、`docs/dev/snapshot-design.md`。
 
 ---
 
@@ -24,7 +24,7 @@ Ech0 是一个**自托管的轻量个人微博（时间线）平台**，以**单
 | 前端 | Vue 3 + Vite + TS + Pinia + Vue Router + vue-i18n + UnoCSS(Wind4) + markdown-it/Vditor |
 | 自研库（`pkg/`） | busen（事件总线）、gocap（PoW 验证码）、virefs（文件系统抽象）、viewer（请求身份上下文）、app（组件生命周期）、egress（SSRF 防护出站 HTTP） |
 
-设计基调有两条贯穿全局（详见 `CLAUDE.md`）：
+设计基调有两条贯穿全局（详见 `AGENTS.md`）：
 
 1. **轻量优先**：评估任何新功能时，"会不会让项目变重"是一票否决项。
 2. **依赖向内指向纯词汇**：事件契约、配置规格、LLM 工具抽象等"纯定义"包不依赖任何基础设施/领域；基础设施依赖定义，而非反过来。
@@ -445,7 +445,7 @@ internal/mcp/Adapter（adapter_*.go）── 注入 8 个领域 service：
 
 | 模块 | 角色 | 关键符号 / 备注 |
 | --- | --- | --- |
-| `internal/config` | env 配置单例（caarlos0/env） | `config.Config()`（sync.Once），见 `.env.example` |
+| `internal/config` | env 配置单例（caarlos0/env + `./.env`） | `config.Config()`（sync.Once），变量清单见 [usage/configuration.md](../usage/configuration.md) |
 | `internal/database` | GORM+SQLite 初始化、自动迁移、写锁、热切换 | `GetDB/SetDB`(atomic)、`MigrateDB`、`HotChangeDatabase`（快照用）、`EnableWriteLock` |
 | `internal/cache` | 应用缓存：`Backend` 接口（Ristretto 实现）+ 泛型方法读穿透（singleflight 合并、事务内绕过） | `Cache`、`Backend`、`ReadThrough[T]`/`ReadThroughUnlessTx[T]` |
 | `internal/kvstore` | KV 抽象，两实现 | `Store` 接口、`Memory`(易失) / `Persistent`(落库，包 keyvalue repo)；字段命名 `durableKV` / `ephemeralKV` |

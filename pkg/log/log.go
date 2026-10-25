@@ -77,7 +77,7 @@ func DefaultLogConfig() LogConfig {
 	return LogConfig{
 		Level:   "info",
 		Format:  "json",
-		Console: false,
+		Console: true,
 		File: FileConfig{
 			Enable:     true,
 			Filename:   "data/app.log",
@@ -145,10 +145,11 @@ func initializeLogger(config LogConfig) {
 		startFileSink(config)
 	}
 
-	leaves := []slog.Handler{
-		newConsoleLeaf(config, levelVar),
-		&ringHandler{hub: streamHub, level: levelVar},
+	leaves := make([]slog.Handler, 0, 2)
+	if config.Console {
+		leaves = append(leaves, newConsoleLeaf(config, levelVar))
 	}
+	leaves = append(leaves, &ringHandler{hub: streamHub, level: levelVar})
 
 	Logger = slog.New(&fanoutHandler{leaves: leaves})
 }

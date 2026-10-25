@@ -9,7 +9,7 @@ Ech0 采用 **Access Token + Refresh Token** 双令牌机制，遵循 OWASP 推�
 | Token 类型 | 存储位置 | 有效期 | 用途 |
 |---|---|---|---|
 | Access Token (`typ: session`) | 前端 JS 内存变量 | 15 分钟（可配置） | 每次 API 请求携带（Authorization header） |
-| Refresh Token (`typ: refresh`) | HttpOnly Cookie | 7 天（可配置） | 静默刷新、恢复会话 |
+| Refresh Token (`typ: refresh`) | HttpOnly Cookie | 7 天（可配置，滑动续期） | 静默刷新、恢复会话 |
 | API Access Token (`typ: access`) | 数据库（管理面板签发） | 自定义 | 面向 CLI / 集成 / MCP 的长期 token |
 
 ### 1.1 为什么这样设计
@@ -177,8 +177,19 @@ POST /api/auth/refresh  （公开路由，不需要 Authorization header）
 ├─ IsTokenRevoked() 检查是否被吊销
 ├─ GetUserByID() 确认用户仍然存在
 ├─ CreateClaims() + GenerateToken() 签发新 access_token
+├─ RenewRefreshClaims() + GenerateToken() 重签发 refresh_token（沿用原 JTI，exp 滑到 now + RefreshExpires）
+├─ Set-Cookie 重置 refresh_token（Max-Age = RefreshExpires）
 └─ 返回 JSON {access_token, expires_in}
 ```
+
+### 4.4 滑动续期（Sliding Expiration）
+
+Refresh Token 的有效期**从最近一次刷新起算**，不是从登录时刻写死：
+
+- 每次 `POST /api/auth/refresh` 都重签发 refresh token，`exp` 滑到 `now + RefreshExpires`，同时重置 Cookie 的 `Max-Age`；
+- 新 token 复用原 JTI（`RenewRefreshClaims`），因此登出吊销仍能命中同一会话，不会因续期产生"吊销不到"的旧会话；
+- 结果：只要在 `RefreshExpires`（默认 7 天）内活跃过（页面加载或 access token 过期触发的静默刷新即可），就无需重新登录；连续 7 天不活跃才会失效；
+- 由于 JTI 不变，多标签页并发刷新互不干扰（不会出现一方续期把另一方挤下线）。
 
 ## 5. 吊销机制（Token Blacklist）
 

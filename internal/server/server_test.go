@@ -33,3 +33,23 @@ func TestServerStartFailsWhenPortAlreadyBound(t *testing.T) {
 		t.Fatalf("expected start failure when port is already bound")
 	}
 }
+
+func TestListenAddr(t *testing.T) {
+	tests := []struct {
+		host string
+		port string
+		want string
+	}{
+		{host: "", port: "6277", want: ":6277"},
+		{host: "0.0.0.0", port: "6277", want: ":6277"},
+		{host: "::", port: "6277", want: ":6277"},
+		{host: "127.0.0.1", port: "6277", want: "127.0.0.1:6277"},
+		{host: "::1", port: "6277", want: "[::1]:6277"},
+		{host: "localhost", port: "6277", want: "localhost:6277"},
+	}
+	for _, tt := range tests {
+		if got := listenAddr(tt.host, tt.port); got != tt.want {
+			t.Errorf("listenAddr(%q, %q) = %q, want %q", tt.host, tt.port, got, tt.want)
+		}
+	}
+}
