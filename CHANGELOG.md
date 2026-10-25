@@ -9,17 +9,41 @@ For releases prior to v4.6.5, see the [GitHub releases page](https://github.com/
 
 ## [Unreleased]
 
+## [5.8.3] - 2026-10-25
+
+### Added
+
+* **The `em` manager script updates itself.** `em self-update` (menu option 10) replaces `/usr/local/sbin/em` with the current script and refreshes the `em` / `ech0` links, and `em update` now does the same on every run, even when the server binary is already current. Installs that still run the old script need one bootstrap: `curl -fsSL https://raw.githubusercontent.com/lin-snow/Ech0/main/scripts/ech0.sh | sudo bash -s -- self-update`.
+
+* **`em logs`, `em help`, and `em update --force`.** Logs are one command away instead of a raw `journalctl` invocation, `help` lists every action, and `--force` reinstalls the current release when a normal update skips it.
+
+* **Script installs get a persistent `JWT_SECRET`.** When `.env` does not already define one, the installer generates it, so restarting the service no longer invalidates every signed-in session.
+
+* **Install and update verify the service actually started.** Both wait for the unit to become active and probe `/healthz`, and print the last journal lines when startup fails.
+
 ### Fixed
 
-* **自定义 `ECH0_DB_PATH` 不再崩溃或建错目录。** 目录计算之前硬编码 `/ech0.db` 后缀：相对文件名（如 `ech0.db`）直接 panic，`data/mydb.sqlite` 这类路径会把父目录算成 `data/my`。现在目录取自路径本身，任意文件名/嵌套路径都能用；`ECH0_DB_TYPE` 不是 `sqlite` 时启动即给出明确错误，而不是带着空 DB 句柄继续跑。
+* **`curl … | bash` no longer installs the shell as the manager.** The installer copied `/bin/bash` to `/usr/local/sbin/em` when it could not find its own script file; it now downloads the real script instead.
 
-* **`ECH0_SERVER_HOST` 与 `ECH0_LOG_CONSOLE` 真正生效。** 之前监听地址固定为所有网卡、控制台输出无法关闭。现在 `ECH0_SERVER_HOST=127.0.0.1` 会收窄绑定（空 / `0.0.0.0` / `::` 仍保持双栈），`ECH0_LOG_CONSOLE=false` 只写日志文件与 TUI 日志流（默认仍为 `true`，行为不变）。
+* **Only stable Ech0 releases are selected.** Version lookup uses the latest-release endpoint and ignores pre-releases and chart tags such as `ech0-5.8.2`.
 
-* **`.env` 与 JWT 密钥的失败提示更准确。** `.env` 存在但解析失败时报告具体错误，不再误报 “No .env file found”；未设置 `JWT_SECRET` 时明确提示重启会让已签发 token 失效，并新增 `ECH0_JWT_SECRET` 别名；数值型 env 写错时提示受影响字段保持默认值。
+* **A failed update rolls back.** The previous binary is kept as `ech0.bak` and restored automatically if the new one does not start.
 
-* **删除一批从未生效的 env。** `ECH0_MIGRATION_*`、`ECH0_COMMENT_ENABLE`（评论开关属于后台设置）、`ECH0_UPLOAD_{IMAGE,AUDIO,VIDEO}_PATH`（存储路径由扩展名路由决定）之前只是摆设，设置后没有任何效果。全量变量与默认值见新增的 [`docs/usage/configuration.md`](docs/usage/configuration.md)。
+* **The manager's "current information" menu item works again.** It called the removed `ech0 info` command; it now runs `ech0 version`.
 
-* **登录不再每周失效。** Refresh token 之前是登录时刻起算的固定 7 天，而 `/api/auth/refresh` 只签发 access token、从不续期 refresh cookie，所以无论多活跃，一周后都必须重新登录。现在每次静默刷新都会重签发 refresh token 并重置 Cookie（`exp` 滑到 `now + ECH0_JWT_REFRESH_EXPIRES`），只要 7 天内活跃过就不会掉登录；续期沿用原 JTI，登出吊销仍作用于同一会话，多标签页并发刷新也不会互相挤下线。
+* **Uninstall keeps configuration together with the data.** Keeping `data/` now also keeps `.env`, and the "already installed" message points at `update` / `self-update` instead of a dead end.
+
+* **The systemd unit waits for the network and stops cleanly.** It starts after `network-online.target` and allows 30 seconds for shutdown.
+
+* **A custom `ECH0_DB_PATH` no longer crashes or creates the wrong directory.** Directory resolution hardcoded an `/ech0.db` suffix: a bare file name such as `ech0.db` panicked, and `data/mydb.sqlite` resolved its parent to `data/my`. The directory now comes from the path itself, so any file name or nesting works, and an `ECH0_DB_TYPE` other than `sqlite` fails at startup with a clear error instead of running on an empty DB handle.
+
+* **`ECH0_SERVER_HOST` and `ECH0_LOG_CONSOLE` now take effect.** The listener was pinned to all interfaces and console output could not be turned off. `ECH0_SERVER_HOST=127.0.0.1` now narrows the bind address (empty / `0.0.0.0` / `::` still keeps dual-stack), and `ECH0_LOG_CONSOLE=false` writes only to the log file and TUI log stream (the default stays `true`, so existing behavior is unchanged).
+
+* **Clearer errors for `.env` and JWT secrets.** A `.env` file that exists but fails to parse now reports the real error instead of "No .env file found"; an unset `JWT_SECRET` warns that restarting invalidates issued tokens and adds an `ECH0_JWT_SECRET` alias; a malformed numeric env value names the affected field and keeps its default.
+
+* **Dead env vars removed.** `ECH0_MIGRATION_*`, `ECH0_COMMENT_ENABLE` (comments are toggled in the admin panel), and `ECH0_UPLOAD_{IMAGE,AUDIO,VIDEO}_PATH` (storage paths are chosen by extension routing) had no effect when set. See the new [`docs/usage/configuration.md`](docs/usage/configuration.md) for the full variable and default list.
+
+* **Sessions no longer expire every week.** The refresh token used a fixed 7 days from sign-in, and `/api/auth/refresh` only issued access tokens and never renewed the refresh cookie, so even an active user had to sign in again after a week. Every silent refresh now reissues the refresh token and resets the cookie (`exp` slides to `now + ECH0_JWT_REFRESH_EXPIRES`), so staying active within 7 days keeps you signed in. Renewal keeps the original JTI, so logout still revokes the same session and concurrent refreshes from multiple tabs no longer sign each other out.
 
 
 ## [5.8.2] - 2026-10-22
@@ -818,7 +842,8 @@ This is primarily a security release: six advisories disclosed since v4.7.2 are 
 
   Practical risk in this repo was negligible (the vulnerable code only runs at PWA build time on developer-controlled input), but the alerts are now resolved at the supply-chain level.
 
-[Unreleased]: https://github.com/lin-snow/Ech0/compare/v5.5.0...HEAD
+[Unreleased]: https://github.com/lin-snow/Ech0/compare/v5.8.3...HEAD
+[5.8.3]: https://github.com/lin-snow/Ech0/compare/v5.8.2...v5.8.3
 [5.5.0]: https://github.com/lin-snow/Ech0/compare/v5.4.7...v5.5.0
 [5.4.7]: https://github.com/lin-snow/Ech0/compare/v5.4.6...v5.4.7
 [5.4.6]: https://github.com/lin-snow/Ech0/compare/v5.4.5...v5.4.6
