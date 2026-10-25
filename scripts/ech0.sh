@@ -449,8 +449,7 @@ install_cli_helper() {
     if [ -z "$tmp_file" ]; then
       return 1
     fi
-    if curl -fsSL --proto '=https' --connect-timeout 10 --max-time 60 \
-      "$SCRIPT_URL" -o "$tmp_file"; then
+    if fetch_script "$tmp_file"; then
       mv -f "$tmp_file" "$MANAGER_PATH" || log_warn "写入管理脚本失败"
     else
       rm -f "$tmp_file"
@@ -460,10 +459,76 @@ install_cli_helper() {
   fi
 
   chmod 755 "$MANAGER_PATH" 2>/dev/null || true
+  link_manager_command
+}
 
+fetch_script() {
+  local dest=$1
+  curl -fsSL --proto '=https' --connect-timeout 10 --max-time 60 \
+    "$SCRIPT_URL" -o "$dest" || return 1
+  grep -q '^SERVICE_NAME="ech0"' "$dest" 2>/dev/null || return 1
+  chmod 755 "$dest" 2>/dev/null || true
+}
+
+link_manager_command() {
   mkdir -p "$(dirname "$COMMAND_LINK")"
-  ln -sf "$MANAGER_PATH" "$COMMAND_LINK" || log_warn "创建命令链接失败"
-  ln -sf "$MANAGER_PATH" "$COMMAND_LINK_COMPAT" || log_warn "创建命令链接失败"
+  if [ "$COMMAND_LINK" != "$MANAGER_PATH" ]; then
+    ln -sf "$MANAGER_PATH" "$COMMAND_LINK" || log_warn "创建命令链接失败"
+  fi
+  if [ "$COMMAND_LINK_COMPAT" != "$MANAGER_PATH" ] && [ "$COMMAND_LINK_COMPAT" != "$COMMAND_LINK" ]; then
+    ln -sf "$MANAGER_PATH" "$COMMAND_LINK_COMPAT" || log_warn "创建命令链接失败"
+  fi
+}
+
+# 从远端脚本仓库刷新已安装的管理脚本；allow_create=true 时允许新建（self-update）
+refresh_manager() {
+  local allow_create=${1:-false}
+  local dir
+  local tmp_file
+
+  if [ ! -f "$MANAGER_PATH" ] && [ "$allow_create" != "true" ]; then
+    return 0
+  fi
+
+  dir=$(dirname "$MANAGER_PATH")
+  mkdir -p "$dir" || {
+    log_warn "无法创建目录: ${dir}"
+    return 1
+  }
+
+  tmp_file=$(mktemp "${dir}/.em.XXXXXX") || {
+    log_warn "无法创建临时文件，跳过管理脚本更新"
+    return 1
+  }
+
+  if ! fetch_script "$tmp_file"; then
+    rm -f "$tmp_file"
+    log_warn "获取管理脚本失败（${SCRIPT_URL}），跳过管理脚本更新"
+    return 1
+  fi
+
+  if [ -f "$MANAGER_PATH" ] && cmp -s "$tmp_file" "$MANAGER_PATH"; then
+    rm -f "$tmp_file"
+    log_info "管理脚本已是最新: ${MANAGER_PATH}"
+    return 0
+  fi
+
+  if ! mv -f "$tmp_file" "$MANAGER_PATH"; then
+    rm -f "$tmp_file"
+    log_warn "替换管理脚本失败: ${MANAGER_PATH}"
+    return 1
+  fi
+  chmod 755 "$MANAGER_PATH" 2>/dev/null || true
+  link_manager_command
+
+  log_info "管理脚本已更新: ${MANAGER_PATH}"
+  return 0
+}
+
+self_update() {
+  ensure_root
+  ensure_command curl
+  refresh_manager true
 }
 
 should_install_cli_helper() {
@@ -492,7 +557,7 @@ install_ech0() {
   local installed_path
   installed_path=$(get_installed_path)
   if [ -f "$installed_path/ech0" ]; then
-    handle_error 1 "检测到 Ech0 已安装在 ${installed_path}，请使用 update 或先 uninstall"
+    handle_error 1 "检测到 Ech0 已安装在 ${installed_path}，请使用 update 或先 uninstall（仅升级管理脚本可用 self-update）"
   fi
 
   local target_path
@@ -549,6 +614,7 @@ update_ech0() {
 
   detect_arch
   resolve_latest_tag
+  refresh_manager
 
   local current_version
   current_version=$(installed_version "$target_path" 2>/dev/null || true)
@@ -814,9 +880,10 @@ show_menu() {
   echo "7) 停止服务"
   echo "8) 重启服务"
   echo "9) 查看服务日志"
+  echo "10) 更新管理脚本"
   echo "0) 退出脚本"
   echo
-  read -r -p "请选择 [0-9]: " choice
+  read -r -p "请选择 [0-9/10]: " choice
 
   case "$choice" in
     1)
@@ -853,6 +920,9 @@ show_menu() {
     9)
       show_logs
       ;;
+    10)
+      self_update
+      ;;
     0)
       exit 0
       ;;
@@ -871,6 +941,7 @@ usage() {
   status           查看服务状态
   version          查看已安装版本
   logs [-f]        查看服务日志（-f 持续跟踪）
+  self-update      更新管理脚本自身（update 也会自动刷新）
   start            启动服务
   stop             停止服务
   restart          重启服务
@@ -913,6 +984,9 @@ main() {
       ;;
     logs)
       show_logs "${2:-}"
+      ;;
+    self-update)
+      self_update
       ;;
     start)
       start_service

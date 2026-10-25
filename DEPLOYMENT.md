@@ -63,6 +63,14 @@ curl -fsSL "https://raw.githubusercontent.com/lin-snow/Ech0/main/scripts/ech0.sh
 
 > The script installs and manages Ech0 through systemd, so please run with root privileges when needed.
 > You can run `bash ech0.sh install /your/path/ech0` to customize the install path.
+>
+> Already running an older `em` manager script? Refresh it once (installs the current script to `/usr/local/sbin/em`):
+>
+> ```shell
+> curl -fsSL "https://raw.githubusercontent.com/lin-snow/Ech0/main/scripts/ech0.sh" | sudo bash -s -- self-update
+> ```
+>
+> Afterwards `em update` keeps both the server binary and the manager script up to date.
 
 ### ☸️ Kubernetes (Helm)
 
