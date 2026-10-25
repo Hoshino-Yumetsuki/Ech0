@@ -6,6 +6,7 @@ package config
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -20,20 +21,19 @@ var (
 )
 
 type AppConfig struct {
-	Server    ServerConfig
-	OpenAPI   OpenAPIConfig
-	Database  DatabaseConfig
-	Log       LogConfig
-	Auth      AuthConfig
-	Upload    UploadConfig
-	Storage   StorageConfig
-	Event     EventConfig
-	Migration MigrationConfig
-	Setting   SettingConfig
-	Comment   CommentConfig
-	Security  SecurityConfig
-	Web       WebConfig
-	Agent     AgentConfig
+	Server   ServerConfig
+	OpenAPI  OpenAPIConfig
+	Database DatabaseConfig
+	Log      LogConfig
+	Auth     AuthConfig
+	Upload   UploadConfig
+	Storage  StorageConfig
+	Event    EventConfig
+	Setting  SettingConfig
+	Comment  CommentConfig
+	Security SecurityConfig
+	Web      WebConfig
+	Agent    AgentConfig
 }
 
 type StorageConfig struct {
@@ -108,12 +108,9 @@ type WebAuthnConfig struct {
 
 type UploadConfig struct {
 	AllowedTypes []string
-	ImageMaxSize int    `env:"ECH0_UPLOAD_IMAGE_MAX_SIZE"`
-	AudioMaxSize int    `env:"ECH0_UPLOAD_AUDIO_MAX_SIZE"`
-	VideoMaxSize int    `env:"ECH0_UPLOAD_VIDEO_MAX_SIZE"`
-	ImagePath    string `env:"ECH0_UPLOAD_IMAGE_PATH"`
-	AudioPath    string `env:"ECH0_UPLOAD_AUDIO_PATH"`
-	VideoPath    string `env:"ECH0_UPLOAD_VIDEO_PATH"`
+	ImageMaxSize int `env:"ECH0_UPLOAD_IMAGE_MAX_SIZE"`
+	AudioMaxSize int `env:"ECH0_UPLOAD_AUDIO_MAX_SIZE"`
+	VideoMaxSize int `env:"ECH0_UPLOAD_VIDEO_MAX_SIZE"`
 }
 
 type SettingConfig struct {
@@ -131,7 +128,6 @@ type SettingConfig struct {
 }
 
 type CommentConfig struct {
-	EnableComment         bool   `env:"ECH0_COMMENT_ENABLE"`
 	CaptchaSiteKey        string `env:"ECH0_COMMENT_CAPTCHA_SITE_KEY"`
 	CaptchaSecret         string `env:"ECH0_COMMENT_CAPTCHA_SECRET"`
 	CaptchaDifficulty     int    `env:"ECH0_COMMENT_CAPTCHA_DIFFICULTY"`
@@ -172,13 +168,6 @@ type EventConfig struct {
 	WebhookPoolQueue   int    `env:"ECH0_EVENT_WEBHOOK_POOL_QUEUE"`
 }
 
-type MigrationConfig struct {
-	WorkerEnabled   bool `env:"ECH0_MIGRATION_WORKER_ENABLED"`
-	MaxConcurrency  int  `env:"ECH0_MIGRATION_MAX_CONCURRENCY"`
-	BatchSize       int  `env:"ECH0_MIGRATION_BATCH_SIZE"`
-	RateLimitPerSec int  `env:"ECH0_MIGRATION_RATE_LIMIT_PER_SEC"`
-}
-
 type AgentConfig struct {
 	TimeoutSeconds    int `env:"ECH0_AGENT_TIMEOUT_SECONDS"`
 	MaxRounds         int `env:"ECH0_AGENT_MAX_ROUNDS"`
@@ -187,16 +176,28 @@ type AgentConfig struct {
 
 func Config() *AppConfig {
 	once.Do(func() {
-		if err := godotenv.Load(); err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, "No .env file found, using system environment variables")
-		}
+		loadDotEnv()
 		cfg = defaultConfig()
 		if err := env.Parse(cfg); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "Failed to parse env overrides: %v\n", err)
+			_, _ = fmt.Fprintf(
+				os.Stderr,
+				"Invalid environment overrides (affected values keep their defaults): %v\n", err,
+			)
 		}
 		cfg.Security.JWTSecret = getJWTSecret()
 	})
 	return cfg
+}
+
+// loadDotEnv reads ./.env relative to the working directory. A missing file is
+// normal (process env only); an unreadable or malformed file is reported but
+// never fatal, so a broken .env cannot prevent startup.
+func loadDotEnv() {
+	err := godotenv.Load()
+	if err == nil || errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	_, _ = fmt.Fprintf(os.Stderr, "Failed to load .env: %v\n", err)
 }
 
 func defaultConfig() *AppConfig {
@@ -217,7 +218,7 @@ func defaultConfig() *AppConfig {
 		Log: LogConfig{
 			Level:           "info",
 			Format:          "json",
-			Console:         false,
+			Console:         true,
 			FileEnable:      true,
 			FilePath:        "data/app.log",
 			FileMaxSize:     100,
@@ -253,9 +254,6 @@ func defaultConfig() *AppConfig {
 			ImageMaxSize: 20971520,
 			AudioMaxSize: 20971520,
 			VideoMaxSize: 67108864,
-			ImagePath:    "data/files/images/",
-			AudioPath:    "data/files/audios/",
-			VideoPath:    "data/files/videos/",
 			AllowedTypes: []string{
 				"image/jpeg",
 				"image/png",
@@ -278,12 +276,6 @@ func defaultConfig() *AppConfig {
 			WebhookPoolWorkers: 6,
 			WebhookPoolQueue:   6,
 		},
-		Migration: MigrationConfig{
-			WorkerEnabled:   false,
-			MaxConcurrency:  1,
-			BatchSize:       100,
-			RateLimitPerSec: 20,
-		},
 		Setting: SettingConfig{
 			SiteTitle:     "Ech0",
 			ServerLogo:    "/Ech0.svg",
@@ -298,7 +290,6 @@ func defaultConfig() *AppConfig {
 			CustomJS:      "",
 		},
 		Comment: CommentConfig{
-			EnableComment:         false,
 			CaptchaSiteKey:        "ech0-comment",
 			CaptchaSecret:         "",
 			CaptchaDifficulty:     4,
@@ -332,12 +323,22 @@ func defaultConfig() *AppConfig {
 func getJWTSecret() []byte {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
+		// ECH0_JWT_SECRET is accepted as an alias so the prefixed namespace
+		// (used by every other knob) does not silently produce a random secret.
+		secret = os.Getenv("ECH0_JWT_SECRET")
+	}
+	if secret == "" {
 		b := make([]byte, 16)
 		_, err := rand.Read(b)
 		if err != nil {
 			panic(fmt.Sprintf("failed to generate random JWT secret: %v", err))
 		}
 		secret = hex.EncodeToString(b)
+		_, _ = fmt.Fprintln(
+			os.Stderr,
+			"JWT_SECRET is not set; using an ephemeral secret — every restart invalidates issued tokens. "+
+				"Set JWT_SECRET (or ECH0_JWT_SECRET) for persistent sessions.",
+		)
 	}
 
 	return []byte(secret)

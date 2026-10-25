@@ -2,7 +2,7 @@
 
 > 本文讲清 Ech0 里「配置」相关的四层——`config`（env + 默认值）、`internal/setting`（设置原语 + seeder）、`kvstore`（KV 存储）、`transaction`（事务）——**谁依赖谁、事务怎么流、读写各走哪条路**。这是一道严肃的架构题：分层划错、读写不分，会直接拖垮可维护性。
 >
-> 配套：分层后端总览见 [architecture-overview.md](architecture-overview.md)；事务/DI 约定见 `CLAUDE.md`。
+> 配套：分层后端总览见 [architecture-overview.md](architecture-overview.md)；事务/DI 约定见 `AGENTS.md`。
 
 ---
 
@@ -20,9 +20,9 @@ Ech0 的配置分两层，刻意不合并，因为它们的**生命周期**和**
 
 **为什么 bootstrap 配置搬不进设置页** —— 鸡生蛋：设置表本身就在 DB 里。要打开 DB 你得先知道 DB 路径；要在 DB 没起来前返回错误页你得先有端口。这些参数在「能读设置表」之前就被用到了，只能来自 env / config。
 
-> **JWT 密钥是这层最容易踩的坑。** 它不走 caarlos0/env 的 tag，而是裸 `os.Getenv("JWT_SECRET")`（`config.go:320` 的 `getJWTSecret`）。**不设就每次启动随机生成**——结果是每次重启所有已签发 token 全部失效。所以生产环境务必固化 `JWT_SECRET`。这也是「为什么少数项必须留在 env」最直白的例子。
+> **JWT 密钥是这层最容易踩的坑。** 它不走 caarlos0/env 的 tag，而是裸 `os.Getenv("JWT_SECRET")`（`config.go` 的 `getJWTSecret`，同时接受 `ECH0_JWT_SECRET` 别名）。**不设就每次启动随机生成**——结果是每次重启所有已签发 token 全部失效，启动时 stderr 会给出警告。所以生产环境务必固化 `JWT_SECRET`。这也是「为什么少数项必须留在 env」最直白的例子。
 
-`config.go` 用 `caarlos0/env` 给约 84 个字段挂了 `env:"ECH0_*"` tag，技术上端口、S3、日志、上传上限、事件运行时参数都能用 env 覆盖。**但「能覆盖」不等于「推荐这么用」**：除了上面的 bootstrap 项，其余用户可调项都应走设置页（落 KV），env 只是兜底。`config.Config()` 是 `sync.Once` 单例，全局只解析一次。
+`config.go` 用 `caarlos0/env` 给 80 余个字段挂了 `env:"ECH0_*"` tag（完整清单见 [usage/configuration.md](../usage/configuration.md)），技术上端口、S3、日志、上传上限、事件运行时参数都能用 env 覆盖。**但「能覆盖」不等于「推荐这么用」**：除了上面的 bootstrap 项，其余用户可调项都应走设置页（落 KV），env 只是兜底。`config.Config()` 是 `sync.Once` 单例，全局只解析一次。
 
 ---
 
@@ -187,4 +187,4 @@ return s.transactor.Run(ctx, func(ctx context.Context) error {        // ← 开
 - 找默认值 → `internal/config/config.go` + `internal/setting/registry.go` 的 `Spec.Default()`。
 - 加一个新设置项 → 在 `registry.go` 加 `Spec[T]`（key + Default + Normalize），seeder 自动落库；读处直接 `coreSetting.Xxx.Get`，写处走 `SettingService`。
 - 事务为什么「凭空生效」→ `transactor.Run` 把 tx 塞进 `ctx`，repo 的 `getDB(ctx)` 捞出来用；中间各层只转发 `ctx`。
-- token 重启就失效 → `JWT_SECRET` 没设，被 `getJWTSecret` 随机生成了（`config.go:320`）。
+- token 重启就失效 → `JWT_SECRET` 没设，被 `getJWTSecret` 随机生成了（`config.go` 的 `getJWTSecret`）。

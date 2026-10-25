@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -32,6 +33,16 @@ func New(engine *gin.Engine) *Server {
 	}
 }
 
+// listenAddr honors ECH0_SERVER_HOST. Empty, 0.0.0.0 and :: all mean "every
+// interface" and keep the historical dual-stack bind (":port").
+func listenAddr(host, port string) string {
+	switch strings.TrimSpace(host) {
+	case "", "0.0.0.0", "::", "[::]":
+		host = ""
+	}
+	return net.JoinHostPort(host, port)
+}
+
 func (s *Server) Start(context.Context) error {
 	if s.GinEngine == nil {
 		return errors.New("gin engine is nil")
@@ -44,7 +55,7 @@ func (s *Server) Start(context.Context) error {
 	PrintGreetings(port)
 
 	s.httpServer = &http.Server{
-		Addr:    ":" + port,
+		Addr:    listenAddr(config.Config().Server.Host, port),
 		Handler: s.GinEngine,
 	}
 

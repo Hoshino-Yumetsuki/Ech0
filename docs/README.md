@@ -8,6 +8,7 @@
 
 | 文档 | 说明 |
 |------|------|
+| [usage/configuration.md](usage/configuration.md) | 环境变量与 `.env`：加载顺序、全部变量与默认值、env 与后台设置的边界、常见坑 |
 | [usage/mcp-usage.md](usage/mcp-usage.md) | MCP（Model Context Protocol）接入：Token、Host 配置、协议要点 |
 | [usage/webhook-usage.md](usage/webhook-usage.md) | Webhook：事件、签名、管理接口与故障处理 |
 | [usage/storage-migration.md](usage/storage-migration.md) | 存储迁移：本地与 S3、`key` 与路径规则、换桶与迁移注意事项 |

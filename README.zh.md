@@ -252,7 +252,7 @@ docker run -d \
 
 **开发**
 
-本地开发环境、依赖安装与前后端联调说明请见 **[docs/dev/development.md](./docs/dev/development.md)**。更高层的项目架构与代码规范请参考 [`CLAUDE.md`](./CLAUDE.md) 与 [`CONTRIBUTING.md`](./CONTRIBUTING.md)。交互式架构图见 **[ech0.app/arch](https://www.ech0.app/arch)**。
+本地开发环境、依赖安装与前后端联调说明请见 **[docs/dev/development.md](./docs/dev/development.md)**。更高层的项目架构与代码规范请参考 [`AGENTS.md`](./AGENTS.md) 与 [`CONTRIBUTING.md`](./CONTRIBUTING.md)。交互式架构图见 **[ech0.app/arch](https://www.ech0.app/arch)**。
 
 ---
 
